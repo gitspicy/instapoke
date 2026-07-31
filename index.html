@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>InstaPoke &mdash; PVP Counter Lookup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%236d8bff'/%3E%3Ctext x='50' y='68' font-size='60' text-anchor='middle' fill='white' font-family='sans-serif'%3EP%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">InstaPoke</div>
+
+  <div class="league-switch" id="league-switch">
+    <button data-league="great" class="league-btn active">Great</button>
+    <button data-league="ultra" class="league-btn">Ultra</button>
+    <button data-league="master" class="league-btn">Master</button>
+  </div>
+
+  <button id="team-toggle" class="ghost-btn">Edit Team</button>
+</header>
+
+<main>
+  <section class="search-section">
+    <label class="search-label" for="attacker-search">Opponent is using&hellip;</label>
+    <div class="search-box">
+      <input id="attacker-search" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Start typing a Pokémon name (e.g. &quot;azu&quot;)" autofocus />
+      <ul id="search-results" class="search-dropdown hidden"></ul>
+    </div>
+  </section>
+
+  <section id="matchup-panel" class="matchup-panel hidden"></section>
+
+  <section id="team-panel" class="team-panel hidden">
+    <h2>Your PVP Lineup <span class="team-panel-league"></span></h2>
+    <div id="team-slots" class="team-slots"></div>
+    <p class="hint">Set the 3 Pokémon you actually run in this league. Moves default to PvPoke's
+      recommended competitive moveset &mdash; open a slot to override them.</p>
+  </section>
+
+  <section id="empty-state" class="empty-state hidden">
+    <p>No lineup set for this league yet.</p>
+    <button id="empty-edit-team" class="primary-btn">Set up your 3 Pokémon</button>
+  </section>
+</main>
+
+<div id="picker-modal" class="modal hidden">
+  <div class="modal-inner">
+    <input id="picker-search" type="text" autocomplete="off" spellcheck="false" placeholder="Search Pokémon&hellip;" />
+    <ul id="picker-results" class="picker-results"></ul>
+    <button id="picker-close" class="ghost-btn">Cancel</button>
+  </div>
+</div>
+
+<footer>
+  Data: Pokémon/move data &amp; recommended movesets from
+  <a href="https://github.com/pvpoke/pvpoke" target="_blank" rel="noopener">PvPoke</a>.
+  Battle results are computed locally by a simplified simulator &mdash; see README for accuracy notes.
+</footer>
+
+<script src="data/gamemaster.js"></script>
+<script src="data/movesets.js"></script>
+<script src="js/battle-sim.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
