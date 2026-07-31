@@ -161,7 +161,7 @@
         `;
         fillMoveSelect(card.querySelector('[data-role="fast"]'), pool.fast, slot.fastMove);
         fillMoveSelect(card.querySelector('[data-role="charged1"]'), pool.charged, slot.chargedMoves[0], slot.chargedMoves[1]);
-        fillMoveSelect(card.querySelector('[data-role="charged2"]'), pool.charged, slot.chargedMoves[1], slot.chargedMoves[0]);
+        fillMoveSelect(card.querySelector('[data-role="charged2"]'), pool.charged, slot.chargedMoves[1], slot.chargedMoves[0], true);
 
         card.querySelector('[data-role="fast"]').addEventListener("change", (e) => {
           slot.fastMove = e.target.value;
@@ -174,7 +174,7 @@
           recomputeMatchupIfActive();
         });
         card.querySelector('[data-role="charged2"]').addEventListener("change", (e) => {
-          slot.chargedMoves[1] = e.target.value;
+          slot.chargedMoves[1] = e.target.value || null;
           saveState();
           recomputeMatchupIfActive();
         });
@@ -197,8 +197,15 @@
     });
   }
 
-  function fillMoveSelect(select, ids, selectedId, excludeId) {
+  function fillMoveSelect(select, ids, selectedId, excludeId, allowNone) {
     select.innerHTML = "";
+    if (allowNone) {
+      const noneOpt = document.createElement("option");
+      noneOpt.value = "";
+      noneOpt.textContent = "No extra move";
+      if (!selectedId) noneOpt.selected = true;
+      select.appendChild(noneOpt);
+    }
     ids.forEach((id) => {
       if (id === excludeId) return;
       const opt = document.createElement("option");
@@ -397,6 +404,7 @@
   // ---------- matchup panel ----------
 
   const matchupPanelEl = document.getElementById("matchup-panel");
+  let attackerMovesetEditorOpen = false;
 
   function renderMatchupPanel() {
     if (!currentAttacker) {
@@ -443,7 +451,7 @@
     `;
 
     const editor = document.createElement("div");
-    editor.className = "moveset-editor hidden";
+    editor.className = "moveset-editor" + (attackerMovesetEditorOpen ? "" : " hidden");
     editor.id = "moveset-editor";
     editor.innerHTML = `
       <select data-role="fast"></select>
@@ -452,7 +460,7 @@
     `;
     fillMoveSelect(editor.querySelector('[data-role="fast"]'), pool.fast, currentAttacker.fastMove);
     fillMoveSelect(editor.querySelector('[data-role="charged1"]'), pool.charged, currentAttacker.chargedMoves[0], currentAttacker.chargedMoves[1]);
-    fillMoveSelect(editor.querySelector('[data-role="charged2"]'), pool.charged, currentAttacker.chargedMoves[1], currentAttacker.chargedMoves[0]);
+    fillMoveSelect(editor.querySelector('[data-role="charged2"]'), pool.charged, currentAttacker.chargedMoves[1], currentAttacker.chargedMoves[0], true);
     editor.querySelector('[data-role="fast"]').addEventListener("change", (e) => {
       currentAttacker.fastMove = e.target.value;
       renderMatchupPanel();
@@ -462,7 +470,7 @@
       renderMatchupPanel();
     });
     editor.querySelector('[data-role="charged2"]').addEventListener("change", (e) => {
-      currentAttacker.chargedMoves[1] = e.target.value;
+      currentAttacker.chargedMoves[1] = e.target.value || null;
       renderMatchupPanel();
     });
 
@@ -479,10 +487,11 @@
 
     matchupPanelEl.querySelector("#attacker-moveset-label").textContent =
       "assumed: " + moveName(currentAttacker.fastMove) + " / " +
-      currentAttacker.chargedMoves.map(moveName).join(" / ");
+      currentAttacker.chargedMoves.filter(Boolean).map(moveName).join(" / ");
 
     matchupPanelEl.querySelector("#moveset-edit-toggle").addEventListener("click", () => {
-      editor.classList.toggle("hidden");
+      attackerMovesetEditorOpen = !attackerMovesetEditorOpen;
+      editor.classList.toggle("hidden", !attackerMovesetEditorOpen);
     });
   }
 
@@ -503,7 +512,7 @@
       <div class="rank-badge">${isBest ? "★" : "&nbsp;"}</div>
       <div>
         <div class="result-name">${p.speciesName}</div>
-        <div class="result-sub">${moveName(r.slot.fastMove)} / ${r.slot.chargedMoves.map(moveName).join(" / ")}</div>
+        <div class="result-sub">${moveName(r.slot.fastMove)} / ${r.slot.chargedMoves.filter(Boolean).map(moveName).join(" / ")}</div>
       </div>
       <div class="result-score">
         <div class="verdict ${verdictClass}">${verdictText}</div>
