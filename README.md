@@ -40,6 +40,23 @@ so it's remembered next time you open the app on the same machine/browser.
 The search box stays focused so you can keep typing the next opponent's
 name right away — no clicking required between lookups.
 
+### Hands-free (voice) search
+
+Click the 🎤 button next to the search box once (your browser will ask for
+microphone permission the first time). It then listens continuously — just
+say the opponent's name and results pop up automatically, no clicking or
+typing needed, and it keeps listening for the next name right after. Click
+the 🎤 again to turn it off.
+
+Notes:
+- Needs Chrome or Edge (the Web Speech API isn't supported in Firefox/Safari).
+  The mic button is greyed out and disabled if your browser doesn't support it.
+- Speech recognition can mishear tricky species names, so heard phrases are
+  matched tolerantly (e.g. "register steel" → Registeel, "talon flame" →
+  Talonflame) — if it guesses wrong, the status line under the search box
+  shows exactly what it heard so you can just say the name again.
+- Very short/filler sounds ("um", "the") are ignored rather than matched.
+
 ## Data & accuracy
 
 - Pokémon stats, types, moves, and recommended movesets come from
@@ -64,8 +81,3 @@ name right away — no clicking required between lookups.
 - `scripts/test-sim.mjs` is a small dev-only sanity check that compares the
   simulator's win/loss direction against a few known PvPoke matchup ratings.
   Run it with `node scripts/test-sim.mjs` after touching `battle-sim.js`.
-
-## What's next
-
-The search box is intentionally simple (type name → Enter) so a future
-hands-free/voice input can drop in without changing anything else.

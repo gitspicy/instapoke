@@ -117,7 +117,7 @@ main {
 #attacker-search {
   width: 100%;
   font-size: 28px;
-  padding: 16px 20px;
+  padding: 16px 64px 16px 20px;
   border-radius: 12px;
   border: 2px solid var(--border);
   background: var(--panel);
@@ -128,6 +128,49 @@ main {
 #attacker-search:focus {
   border-color: var(--accent);
 }
+
+.voice-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--panel-alt);
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.voice-btn:hover { border-color: var(--accent); }
+.voice-btn.listening {
+  border-color: var(--win-strong);
+  background: var(--win-strong);
+  animation: voice-pulse 1.4s ease-in-out infinite;
+}
+.voice-btn.unsupported {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.voice-btn.denied {
+  border-color: var(--loss-strong);
+}
+
+@keyframes voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(23, 217, 122, 0.5); }
+  50% { box-shadow: 0 0 0 10px rgba(23, 217, 122, 0); }
+}
+
+.voice-status {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.voice-status.error { color: var(--loss); }
 
 .search-dropdown, .picker-results {
   list-style: none;

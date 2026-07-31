@@ -267,11 +267,13 @@
   let activeIndex = -1;
   let currentMatches = [];
 
-  searchInput.addEventListener("input", () => {
+  function handleSearchTextChanged() {
     currentMatches = searchPokemon(searchInput.value, 8);
     activeIndex = -1;
     renderSearchDropdown();
-  });
+  }
+
+  searchInput.addEventListener("input", handleSearchTextChanged);
 
   searchInput.addEventListener("keydown", (e) => {
     if (currentMatches.length === 0) return;
@@ -325,6 +327,71 @@
 
   function recomputeMatchupIfActive() {
     if (currentAttacker) renderMatchupPanel();
+  }
+
+  // ---------- voice search (hands-free) ----------
+
+  const voiceBtn = document.getElementById("voice-toggle");
+  const voiceStatusEl = document.getElementById("voice-status");
+
+  function setVoiceStatus(text, isError) {
+    voiceStatusEl.textContent = text || "";
+    voiceStatusEl.classList.toggle("hidden", !text);
+    voiceStatusEl.classList.toggle("error", !!isError);
+  }
+
+  if (!VoiceSearch.supported) {
+    voiceBtn.classList.add("unsupported");
+    voiceBtn.title = "Hands-free voice search needs Chrome or Edge";
+  } else {
+    const voiceController = VoiceSearch.createController({
+      onInterim(text) {
+        searchInput.value = text;
+        handleSearchTextChanged();
+      },
+      onFinal(text) {
+        const match = VoiceSearch.matchSpecies(text, POKEMON_LIST);
+        if (match) {
+          selectAttacker(match.speciesId);
+          setVoiceStatus("🎤 Listening — heard “" + match.speciesName + "”");
+        } else {
+          searchInput.value = text;
+          handleSearchTextChanged();
+          setVoiceStatus("🎤 Didn't catch a Pokémon name in “" + text.trim() + "” — try again");
+        }
+      },
+      onStatus(status) {
+        if (status === "listening") {
+          voiceBtn.classList.add("listening");
+          voiceBtn.classList.remove("denied");
+          voiceBtn.setAttribute("aria-pressed", "true");
+          setVoiceStatus("🎤 Listening — say a Pokémon name");
+        } else if (status === "stopped") {
+          voiceBtn.classList.remove("listening");
+          voiceBtn.setAttribute("aria-pressed", "false");
+          setVoiceStatus("");
+        } else if (status === "denied") {
+          voiceBtn.classList.remove("listening");
+          voiceBtn.classList.add("denied");
+          voiceBtn.setAttribute("aria-pressed", "false");
+          setVoiceStatus("Microphone access denied — allow it in your browser's site settings, then click the mic again.", true);
+        } else if (status === "fatal") {
+          voiceBtn.classList.remove("listening");
+          voiceBtn.setAttribute("aria-pressed", "false");
+          setVoiceStatus("Voice recognition stopped after repeated errors — click the mic to retry.", true);
+        }
+        // transient "error:*" statuses (e.g. a dropped network blip) are left
+        // unsurfaced since onend will auto-restart the recognizer.
+      },
+    });
+
+    voiceBtn.addEventListener("click", () => {
+      if (voiceController.isListening) {
+        voiceController.stop();
+      } else {
+        voiceController.start();
+      }
+    });
   }
 
   // ---------- matchup panel ----------

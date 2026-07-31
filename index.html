@@ -27,8 +27,10 @@
     <div class="search-box">
       <input id="attacker-search" type="text" autocomplete="off" spellcheck="false"
              placeholder="Start typing a Pokémon name (e.g. &quot;azu&quot;)" autofocus />
+      <button id="voice-toggle" class="voice-btn" title="Hands-free voice search" aria-pressed="false">🎤</button>
       <ul id="search-results" class="search-dropdown hidden"></ul>
     </div>
+    <div id="voice-status" class="voice-status hidden"></div>
   </section>
 
   <section id="matchup-panel" class="matchup-panel hidden"></section>
@@ -63,6 +65,7 @@
 <script src="data/gamemaster.js"></script>
 <script src="data/movesets.js"></script>
 <script src="js/battle-sim.js"></script>
+<script src="js/voice.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
