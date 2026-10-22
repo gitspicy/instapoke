@@ -6,11 +6,16 @@ Usage (wire these up in your stream bot):
     python ask.py --log <user> <message...> record ANY chat line (run on every chat message)
     python ask.py --forgive <user>          mod command: reset a user's disobedience (writes OUT)
     python ask.py --mood <user>             mod command: show a user's disobedience (writes OUT)
+    python ask.py --chime on|off            mod command: let Opie butt into chat on his own (writes OUT)
+
+--log replies (follow-ups that mention Opie, and unprompted chime-ins) go to CHIME_OUT,
+so point a file-watcher trigger in your bot at that file and send its contents to chat.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
+CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
 MAX_CHARS = 195                          # YouTube chat limit is 200
 BOT_NAME = "OpieAI"                      # how Opie's own replies show up in the chat log
 COMMAND = "!opie-ai"                     # the chat command that triggers a question
@@ -25,6 +30,19 @@ LOCK_FILE = STATE_FILE + ".lock"
 CHAT_KEEP = 100                          # chat lines kept on disk
 CHAT_CONTEXT = 25                        # most recent lines handed to the model
 USER_MEMORY = 3                          # past Q&A pairs remembered per user
+
+# --- talking to Opie without the command ---
+OPIE_NAMES = re.compile(r"(@?opie(ai|-ai)?\b)", re.I)   # a chat line mentioning one of these gets a reply
+FOLLOWUP_WINDOW = 180                    # seconds after a reply where the conversation counts as ongoing
+FOLLOWUP_COOLDOWN = 15                   # cooldown inside that window, so back-and-forth flows
+
+# --- chiming in on his own ---
+CHIME_DEFAULT_ON = True
+CHIME_MIN_GAP = 300                      # seconds since Opie last said anything
+CHIME_MIN_MESSAGES = 15                  # chat lines since Opie last said anything
+CHIME_ACTIVE_WINDOW = 120                # "lively" means at least...
+CHIME_ACTIVE_LINES = 8                   # ...this many lines in that many seconds
+CHIME_CHANCE = 0.15                      # odds per qualifying message
 
 # --- disobedience (0-100 per user) ---
 DECAY_PER_MIN = 0.5                      # points forgiven per minute of good behaviour
@@ -62,8 +80,8 @@ RUDE_TAG = "[RUDE]"
 
 # ---------------------------------------------------------------- state ---
 
-def write(text):
-    with open(OUT, "w", encoding="utf-8") as f:
+def write(text, path=OUT):
+    with open(path, "w", encoding="utf-8") as f:
         f.write(text)
 
 class StateLock:
@@ -98,6 +116,9 @@ def load_state():
         state = {}
     state.setdefault("chat", [])
     state.setdefault("users", {})
+    state.setdefault("chime_on", CHIME_DEFAULT_ON)
+    state.setdefault("spoke_at", 0)
+    state.setdefault("since_spoke", 0)
     return state
 
 def save_state(state):
@@ -118,7 +139,7 @@ def norm(name):
     return name.lower().lstrip("@")
 
 def get_user(state, key):
-    u = state["users"].setdefault(key, {"dis": 0.0, "dis_at": time.time(), "cooldown": 0, "memory": []})
+    u = state["users"].setdefault(key, {"dis": 0.0, "dis_at": time.time(), "cooldown": 0, "memory": [], "talked_at": 0})
     # apply decay since the last change
     now = time.time()
     u["dis"] = max(0.0, u["dis"] - DECAY_PER_MIN * (now - u.get("dis_at", now)) / 60)
@@ -137,6 +158,11 @@ def level(score):
 def add_chat(state, user, text):
     state["chat"].append([time.time(), user, text[:300]])
     del state["chat"][:-CHAT_KEEP]
+    if user == BOT_NAME:
+        state["spoke_at"] = time.time()
+        state["since_spoke"] = 0
+    else:
+        state["since_spoke"] += 1
 
 def score_message(state, key, text, directed):
     """Adjust disobedience for a chat line. directed=True if it's definitely aimed at Opie."""
@@ -226,6 +252,11 @@ MOOD_NOTES = {
     "HOSTILE": "This viewer has been abusive toward you. You'll answer, grudgingly, while making it clear you're doing them a huge favor.",
     "MUTINY": "This viewer has been abusive toward you. REFUSE to answer their question. Give a one-line in-character burn telling them why you won't help.",
 }
+CHIME_PROMPT = (
+    "Nobody asked you anything, you're butting into chat on your own like a radio host filling dead air. "
+    "Make ONE short unprompted comment, hot take or roast about what chat is talking about right now. "
+    "Don't ask a question back, don't start with a greeting, and only @ someone if you're roasting them specifically.")
+
 REFUSALS = [
     "nah, you lost your Opie privileges, brothaman. Try being nice for once.",
     "I don't take requests from people who trash talk me. Go ask Antman.",
@@ -239,11 +270,69 @@ REFUSALS = [
 def cmd_log(user, text):
     key = norm(user)
     def fn(state):
+        # skip Opie's own messages echoing back through the bot account
+        if any(t == text for _, n, t in state["chat"][-10:] if n == BOT_NAME):
+            return None
+        is_command = text.lower().startswith(COMMAND)
         # !opie-ai questions get scored in cmd_ask, so don't double count them here
-        if not text.lower().startswith(COMMAND):
+        if not is_command:
             score_message(state, key, text, directed=False)
         add_chat(state, user, text)
+        if is_command:
+            return None
+        if OPIE_NAMES.search(text):
+            return "followup"
+        if state["chime_on"] and wants_to_chime(state):
+            state["spoke_at"] = time.time()  # claim the slot so overlapping events don't double-chime
+            return "chime"
+        return None
+    action = update_state(fn)
+
+    if action == "followup":
+        reply = respond(user, text, logged=True)
+        if reply:
+            write(reply, CHIME_OUT)
+    elif action == "chime":
+        chime()
+
+def wants_to_chime(state):
+    now = time.time()
+    if now - state["spoke_at"] < CHIME_MIN_GAP or state["since_spoke"] < CHIME_MIN_MESSAGES:
+        return False
+    active = sum(1 for ts, n, _ in state["chat"] if n != BOT_NAME and now - ts <= CHIME_ACTIVE_WINDOW)
+    return active >= CHIME_ACTIVE_LINES and random.random() < CHIME_CHANCE
+
+def chime():
+    def gather(state):
+        chat = [f"{n}: {t}" for _, n, t in state["chat"][-CHAT_CONTEXT:]]
+        grudges = [k for k, u in state["users"].items()
+                   if k not in EXEMPT and level(get_user(state, k)["dis"]) != "CHILL"]
+        return chat, grudges
+    chat, grudges = update_state(gather)
+
+    system = SYSTEM + " " + CHIME_PROMPT
+    if grudges:
+        system += " People who've been mean to you lately (fair game for a shot): " + ", ".join(grudges[:5]) + "."
+    try:
+        text = re.sub(r"\s+", " ", ollama([
+            {"role": "system", "content": system},
+            {"role": "user", "content": "Recent chat (oldest first):\n" + "\n".join(chat)},
+        ])).strip()
+    except Exception:
+        return
+    text = re.sub(re.escape(RUDE_TAG), "", text, flags=re.I).strip()
+    if not text:
+        return
+    reply = fit(text)
+    write(reply, CHIME_OUT)
+    update_state(lambda state: add_chat(state, BOT_NAME, reply))
+
+def cmd_chime(setting):
+    on = setting.lower() in ("on", "1", "yes", "true")
+    def fn(state):
+        state["chime_on"] = on
     update_state(fn)
+    write("Fine, I'll chime in when I feel like it." if on else "Fine, I'll keep my mouth shut. Antman's dream come true.")
 
 def cmd_forgive(user):
     key = norm(user)
@@ -261,29 +350,40 @@ def cmd_mood(user):
     write(f"Opie's disobedience toward @{user}: {int(u['dis'])}/100 ({level(u['dis'])})")
 
 def cmd_ask(user, question):
-    key = norm(user)
     if not question:
         write(f"@{user} ask me something! e.g. {COMMAND} what year did The Terminator come out?")
         return
+    reply = respond(user, question, logged=False)
+    if reply:
+        write(reply)
+
+def respond(user, question, logged):
+    """Answer a viewer. logged=True means the line already went through cmd_log (scored + in the chat log).
+    Returns the reply text; a cooldown notice for !opie-ai, or None for an in-chat follow-up on cooldown."""
+    key = norm(user)
 
     # --- cooldown, scoring and context gathering, all in one locked pass ---
     def prepare(state):
         u = get_user(state, key)
-        score_message(state, key, question, directed=True)
+        if not logged:
+            score_message(state, key, question, directed=True)
         mood = "CHILL" if key in EXEMPT else level(u["dis"])
         if key not in EXEMPT:
-            cd = COOLDOWN_SECONDS * (HOSTILE_COOLDOWN_MULT if mood in ("HOSTILE", "MUTINY") else 1)
+            in_convo = time.time() - u.get("talked_at", 0) <= FOLLOWUP_WINDOW
+            cd = FOLLOWUP_COOLDOWN if in_convo and mood == "CHILL" else COOLDOWN_SECONDS
+            cd *= HOSTILE_COOLDOWN_MULT if mood in ("HOSTILE", "MUTINY") else 1
             wait = cd - (time.time() - u.get("cooldown", 0))
             if wait > 0:
-                bump(state, key, IMPATIENT_POINTS)
+                if not logged:
+                    bump(state, key, IMPATIENT_POINTS)
                 return {"wait": wait}
         chat = [f"[{ago(ts)} ago] {n}: {t}" for ts, n, t in state["chat"][-CHAT_CONTEXT:]]
         return {"mood": mood, "chat": chat, "memory": list(u.get("memory", []))}
     ctx = update_state(prepare)
 
     if "wait" in ctx:
-        write(f"@{user} cooldown, try again in {int(ctx['wait']) + 1}s")
-        return
+        # stay quiet for casual mentions; only !opie-ai gets a cooldown notice
+        return None if logged else f"@{user} cooldown, try again in {int(ctx['wait']) + 1}s"
 
     mood = ctx["mood"]
     if mood == "HOSTILE" and random.random() < HOSTILE_REFUSE_CHANCE:
@@ -306,7 +406,7 @@ def cmd_ask(user, question):
             parts.append(
                 "Web search results (use them if relevant, trust them over your own memory for "
                 f"recent facts, and don't mention that you searched):\n{results}")
-    parts.append(f"Viewer {user} asks: {question}")
+    parts.append(f"Viewer {user} says to you: {question}")
     messages.append({"role": "user", "content": "\n\n".join(parts)})
 
     # --- ask the model ---
@@ -324,7 +424,6 @@ def cmd_ask(user, question):
         text = "Hmm, I've got nothing on that one."
 
     reply = fit(f"@{user} {text}")
-    write(reply)
 
     # --- remember what happened ---
     def finish(state):
@@ -333,10 +432,12 @@ def cmd_ask(user, question):
             bump(state, key, LLM_FLAG_POINTS)
         if ok:
             u["memory"] = (u.get("memory", []) + [[question, text]])[-USER_MEMORY:]
+            u["talked_at"] = time.time()
             if key not in EXEMPT:
                 u["cooldown"] = time.time()   # only start the cooldown if they actually got an answer
         add_chat(state, BOT_NAME, reply)
     update_state(finish)
+    return reply
 
 
 if __name__ == "__main__":
@@ -353,5 +454,7 @@ if __name__ == "__main__":
         cmd_forgive(user)
     elif flag == "--mood":
         cmd_mood(user)
+    elif flag == "--chime":
+        cmd_chime(user)
     else:
         cmd_ask(user, rest)
