@@ -8,8 +8,9 @@ Usage (wire these up in your stream bot):
     python ask.py --mood <user>             mod command: show a user's disobedience (writes OUT)
     python ask.py --chime on|off            mod command: let Opie butt into chat on his own (writes OUT)
 
---log replies (follow-ups that mention Opie, and unprompted chime-ins) go to CHIME_OUT,
-so point a file-watcher trigger in your bot at that file and send its contents to chat.
+Every reply is also printed. --log prints nothing unless Opie decides to talk (a message
+mentioning him, or an unprompted chime-in), so a bot can post the output whenever it isn't empty.
+Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
@@ -83,6 +84,13 @@ RUDE_TAG = "[RUDE]"
 def write(text, path=OUT):
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
+    # also print it, so bots like Mix It Up can post the External Program output directly
+    if sys.stdout:
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+        print(text)
 
 class StateLock:
     """Crude cross-process lock so overlapping chat events don't clobber the state file."""

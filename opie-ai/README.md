@@ -2,24 +2,27 @@
 
 YouTube chat bot that runs on a local Ollama model, with SearXNG for web search.
 
-## Bot wiring
+## Bot wiring (Mix It Up)
 
-| Trigger | Command |
+Every reply is written to a file **and** printed, so Mix It Up can post the External Program output directly.
+
+1. **Every chat message:** Events → *Chat Message Received* → add an **External Program** action:
+   - Program: `python` (full path to `python.exe` if needed; **not** `pythonw`, which has no output)
+   - Arguments: `"D:\DOODA\streamscripts\ask.py" --log "$username" "$message"`
+   - Tick **Wait For Finish** and **Save Output**; untick Show Window
+   - Then a **Conditional** action: if `$externalprogramresult` is not empty → **Chat** action posting `$externalprogramresult`
+
+   It only prints something when Opie decides to talk (a message mentioning him, or a chime-in), so chat stays quiet otherwise.
+2. **`!opie-ai`:** keep your existing command (`ask.py "$username" $allargs`).
+3. **Mod commands** (custom commands, Mods role, same External Program → Chat pattern):
+
+| Chat command | Arguments |
 |---|---|
-| **Every chat message** (new) | `python ask.py --log "<user>" "<message>"` |
-| `!opie-ai <question>` | `python ask.py "<user>" <question>` → reply written to `ai_reply.txt` |
-| `!opie-forgive <user>` (mods only) | `python ask.py --forgive "<user>"` → writes to `ai_reply.txt` |
-| `!opie-mood <user>` (mods only) | `python ask.py --mood "<user>"` → writes to `ai_reply.txt` |
-| `!opie-chime on/off` (mods only) | `python ask.py --chime on` / `off` → writes to `ai_reply.txt` |
-| **File watcher on `ai_chime.txt`** (new) | read the file and send it to chat |
+| `!opie-mood <user>` | `ask.py --mood "$arg1text"` |
+| `!opie-forgive <user>` | `ask.py --forgive "$arg1text"` |
+| `!opie-chime on/off` | `ask.py --chime $arg1text` |
 
-`--log` sometimes makes Opie talk: follow-ups and unprompted chime-ins go to `ai_chime.txt`, not `ai_reply.txt`.
-Set up a file-watcher trigger on that file that posts its contents. Don't make the bot wait for `--log` to finish,
-because a reply takes a few seconds.
-
-Use `pythonw` on Windows to stop a console window from flashing for every chat line.
 Everything is stored in `opie_state.json` next to the script. Delete it to wipe all memory.
-This replaces the old `cooldowns.json`.
 
 ## Features
 
