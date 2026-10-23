@@ -14,13 +14,14 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "1.4"                          # bump when ask.py changes
+VERSION = "1.5"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
 PART2_OUT = os.environ.get("OPIE_PART2_OUT", r"D:\DOODA\streamscripts\ai_reply2.txt")   # 2nd message of a long reply, blank if none
 MAX_CHARS = 195                          # YouTube chat limit is 200
 BOT_NAME = "OpieAI"                      # how Opie's own replies show up in the chat log
+BOT_ACCOUNTS = {"opieai"}                # lowercase chat names Opie posts as; their messages are never answered
 COMMAND = "!opie-ai"                     # the chat command that triggers a question
 
 COOLDOWN_SECONDS = 60                    # per-user cooldown
@@ -323,6 +324,8 @@ def cmd_log(user, text):
     key = norm(user)
     def fn(state):
         # skip Opie's own messages echoing back through the bot account
+        if key in BOT_ACCOUNTS:
+            return None
         if any(text.strip() and text.strip() in t for _, n, t in state["chat"][-10:] if n == BOT_NAME):
             return None
         is_command = text.startswith("!")
