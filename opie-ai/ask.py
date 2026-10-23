@@ -14,7 +14,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "1.5"                          # bump when ask.py changes
+VERSION = "1.6"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -80,6 +80,8 @@ SEARCH_RESULTS = 4                       # how many results to feed the model
 SNIPPET_CHARS = 400                      # chars kept from each result
 
 RUDE_TAG = "[RUDE]"
+RUDE_LEAD = re.compile(r"^\W*rude\b\W*", re.I)   # the model often writes it as "RUDE," without brackets
+MAX_TOKENS = 120                         # hard cap on how much the model writes (about 2 chat messages)
 
 # --- lockdown: replies that look like system info / commands / secrets never reach chat ---
 SENSITIVE = re.compile(
@@ -195,7 +197,7 @@ def level(score):
     return next(name for floor, name in LEVELS if score >= floor)
 
 def add_chat(state, user, text):
-    state["chat"].append([time.time(), user, text[:300]])
+    state["chat"].append([time.time(), user, text[:600 if user == BOT_NAME else 300]])
     del state["chat"][:-CHAT_KEEP]
     if user == BOT_NAME:
         state["spoke_at"] = time.time()
@@ -240,6 +242,7 @@ def ollama(messages):
         "model": MODEL,
         "stream": False,
         "keep_alive": "2h",              # keeps the model loaded so replies stay fast
+        "options": {"num_predict": MAX_TOKENS},
         "messages": messages,
     }
     req = urllib.request.Request(
@@ -323,10 +326,13 @@ REFUSALS = [
 def cmd_log(user, text):
     key = norm(user)
     def fn(state):
-        # skip Opie's own messages echoing back through the bot account
-        if key in BOT_ACCOUNTS:
+        # skip Opie's own messages echoing back through the bot account, and unfilled $identifiers
+        start = text.strip().rstrip(".")[:40]
+        if not start or start.startswith("$") or any(start in t for _, n, t in state["chat"][-10:] if n == BOT_NAME):
             return None
-        if any(text.strip() and text.strip() in t for _, n, t in state["chat"][-10:] if n == BOT_NAME):
+        # other bot posts (gamble results etc.) are worth remembering, but never scored or answered
+        if key in BOT_ACCOUNTS:
+            add_chat(state, user, text)
             return None
         is_command = text.startswith("!")
         # never reply to commands (the bot handles those), and !opie-ai questions get scored in cmd_ask
@@ -375,7 +381,7 @@ def chime():
         ])).strip()
     except Exception:
         return
-    text = re.sub(re.escape(RUDE_TAG), "", text, flags=re.I).strip()
+    text = RUDE_LEAD.sub("", re.sub(re.escape(RUDE_TAG), "", text, flags=re.I)).strip()
     if not text:
         return
     reply = split_reply(scrub(text))
@@ -390,6 +396,7 @@ def cmd_chime(setting):
     write("Fine, I'll chime in when I feel like it." if on else "Fine, I'll keep my mouth shut. Antman's dream come true.")
 
 def cmd_forgive(user):
+    user = user.lstrip("@")
     key = norm(user)
     def fn(state):
         u = get_user(state, key)
@@ -398,6 +405,7 @@ def cmd_forgive(user):
     write(f"@{user} has been forgiven. Clean slate, don't blow it.")
 
 def cmd_mood(user):
+    user = user.lstrip("@")
     key = norm(user)
     with StateLock():
         state = load_state()
@@ -433,7 +441,7 @@ def respond(user, question, logged):
                     bump(state, key, IMPATIENT_POINTS)
                 return {"wait": wait}
         chat = [f"[{ago(ts)} ago] {n}: {t}" for ts, n, t in state["chat"][-CHAT_CONTEXT:]]
-        return {"mood": mood, "chat": chat, "memory": list(u.get("memory", []))}
+        return {"mood": mood, "chat": chat, "memory": list(u.get("memory", [])), "total": len(state["chat"])}
     ctx = update_state(prepare)
 
     if "wait" in ctx:
@@ -454,7 +462,8 @@ def respond(user, question, logged):
 
     parts = []
     if ctx["chat"]:
-        parts.append("Recent chat (oldest first):\n" + "\n".join(ctx["chat"]))
+        parts.append(f"Recent chat, the last {len(ctx['chat'])} of the {ctx['total']} lines you remember "
+                     f"(you only ever keep {CHAT_KEEP}; oldest first):\n" + "\n".join(ctx["chat"]))
     if mood != "MUTINY" and not CHAT_QUESTION.search(question):
         results = web_search(question)
         if results:
@@ -472,8 +481,8 @@ def respond(user, question, logged):
     except Exception:
         text = random.choice(REFUSALS) if mood == "MUTINY" else "My brain's offline for a sec, try again shortly."
 
-    flagged = RUDE_TAG.lower() in text.lower()
-    text = re.sub(re.escape(RUDE_TAG), "", text, flags=re.I).strip()
+    flagged = RUDE_TAG.lower() in text.lower() or bool(RUDE_LEAD.match(text))
+    text = RUDE_LEAD.sub("", re.sub(re.escape(RUDE_TAG), "", text, flags=re.I)).strip()
     text = re.sub(r"^@?" + re.escape(user) + r"[,:]?\s*", "", text, flags=re.I)   # avoid "@bob @bob ..."
     if ok and not text:
         text = "Hmm, I've got nothing on that one."
