@@ -15,7 +15,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "2.3"                          # bump when ask.py changes
+VERSION = "2.4"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -145,9 +145,13 @@ DEFLECTIONS = [
     "that's classified, pal. Even Jimmy the worm couldn't get that out of me.",
 ]
 
+STAGE_DIRECTIONS = re.compile(r"\[[^\]]*\]|\*[^*]*\*")   # "[sips wine]", "*laughs*": eats chat space, so cut it
+
 def scrub(text):
     """Swap anything that looks like system info, commands or secrets for a deflection,
     and never let a reply start with ! or / so Mix It Up can't run it as a command."""
+    trimmed = re.sub(r"\s+", " ", STAGE_DIRECTIONS.sub("", text)).strip()
+    text = trimmed or text
     if SENSITIVE.search(text):
         text = random.choice(DEFLECTIONS)
     return text.lstrip("!/ ")
@@ -353,7 +357,7 @@ SYSTEM = (
     "Never start a reply with ! or / and never type chat commands. "
     f"You're running Opie AI version {VERSION}. Only mention it if someone asks what version you are. "
     f"If the viewer's message is genuinely insulting or hostile toward you, start your reply with {RUDE_TAG} (it gets stripped). Don't use it for normal ribbing. "
-    "Reply in plain text, one or two short sentences, under 170 characters. Only go longer if the question really needs it, and never past 350 characters. No markdown, no lists, no emojis, no filler."
+    "Reply in plain text with no stage directions or actions in brackets or asterisks, one or two short sentences, under 170 characters. Only go longer if the question really needs it, and never past 350 characters. No markdown, no lists, no emojis, no filler."
 )
 
 MOOD_NOTES = {
