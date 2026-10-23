@@ -7,7 +7,7 @@ Usage (wire these up in your stream bot):
     python ask.py --forgive <user>          mod command: reset a user's attitude (writes OUT)
     python ask.py --mood <user>             mod command: show a user's attitude (writes OUT)
     python ask.py --roast <user> <target>   roast someone using what they've said in chat (writes OUT)
-    python ask.py --chime on|off            mod command: let Opie butt into chat on his own (writes OUT)
+    python ask.py --chime on|off|status            mod command: let Opie butt into chat on his own (writes OUT)
 
 Every reply is also printed. --log prints nothing unless Opie decides to talk (a message
 mentioning him, or an unprompted chime-in), so a bot can post the output whenever it isn't empty.
@@ -15,7 +15,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "2.4"                          # bump when ask.py changes
+VERSION = "2.5"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -542,11 +542,22 @@ def cmd_roast(user, target):
     update_state(finish)
 
 def cmd_chime(setting):
-    on = setting.lower() in ("on", "1", "yes", "true")
-    def fn(state):
-        state["chime_on"] = on
-    update_state(fn)
-    write("Fine, I'll chime in when I feel like it." if on else "Fine, I'll keep my mouth shut. Antman's dream come true.")
+    setting = setting.lower()
+    if setting in ("on", "1", "yes", "true", "off", "0", "no", "false"):
+        on = setting in ("on", "1", "yes", "true")
+        def fn(state):
+            state["chime_on"] = on
+        update_state(fn)
+        write("Fine, I'll chime in when I feel like it." if on else "Fine, I'll keep my mouth shut. Antman's dream come true.")
+        return
+    # anything else (status, blank, typos) just reports without changing it
+    with StateLock():
+        state = load_state()
+    if state["chime_on"]:
+        quiet = int((time.time() - state["spoke_at"]) / 60)
+        write(f"Chime-ins are ON. I last opened my mouth {quiet} min ago. Use on/off to change it.")
+    else:
+        write("Chime-ins are OFF. I'm muzzled, brothaman. Use on/off to change it.")
 
 def cmd_forgive(user):
     user = user.lstrip("@")
