@@ -1,4 +1,4 @@
-# Opie AI (v3.3)
+# Opie AI (v3.4)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -175,7 +175,8 @@ python ask.py --status "" ""
 | `EDGE_DEFAULT` | `2` | Edge when there's no saved setting |
 | `EDGE_LEVELS` | 0–3 descriptions | What each edge level means to the model |
 | `HARD_LIMITS` | see above | Rules that apply at every edge level |
-| `SPORTS` | NY + Philly + Boston teams | His bandwagon of favourite teams. Edit to add or remove teams |
+| `SPORTS_TEAMS` | NY + Philly + Boston teams by league | His favourite teams. Edit to add or remove teams |
+| `AMBIGUOUS_TEAMS` | Bills, Giants, Nets, Liberty, Union | Team names that are everyday words, so they don't count as sports talk on their own |
 
 ### Roasts and gambling
 | Variable | Default | What it does |
