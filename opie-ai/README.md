@@ -1,4 +1,4 @@
-# Opie AI (v3.0)
+# Opie AI (v3.1)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -39,6 +39,7 @@ The first should print nothing. The second should print Opie's mood and edge.
 |---|---|
 | `op <anything>` | Same as saying "opie": the nickname only works for owners |
 | `opie status` / `op status` / `!ai status` | Full status report: version, mood + edge, Brain/Search health, OBS stream stats, uptime, users he's upset with, chat activity, chime-ins |
+| `opie cpu` / `opie stream` / `opie stats` / `!ai cpu` | Quick OBS check only: bitrate, dropped frames, fps, OBS CPU %, uptime. No grudge list |
 | `opie edge 0-3` / `op edge 0-3` / `!ai edge 0-3` | Set the edge level |
 | `!opie-mood edge 0-3` | Set the edge level |
 
