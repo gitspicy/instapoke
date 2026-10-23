@@ -14,10 +14,11 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "1.3"                          # bump when ask.py changes
+VERSION = "1.4"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
+PART2_OUT = os.environ.get("OPIE_PART2_OUT", r"D:\DOODA\streamscripts\ai_reply2.txt")   # 2nd message of a long reply, blank if none
 MAX_CHARS = 195                          # YouTube chat limit is 200
 BOT_NAME = "OpieAI"                      # how Opie's own replies show up in the chat log
 COMMAND = "!opie-ai"                     # the chat command that triggers a question
@@ -106,8 +107,13 @@ def scrub(text):
 # ---------------------------------------------------------------- state ---
 
 def write(text, path=OUT):
+    """text may hold two chat messages separated by a newline; the second goes to PART2_OUT."""
+    first, _, second = text.partition("\n")
     with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+        f.write(first)
+    with open(PART2_OUT, "w", encoding="utf-8") as f:
+        f.write(second)
+    text = first
     # also print it, so bots like Mix It Up can post the External Program output directly
     if sys.stdout:
         try:
@@ -253,6 +259,16 @@ def fit(reply):
         return cut[:end + 1]
     return cut[:MAX_CHARS - 3].rsplit(" ", 1)[0] + "..."
 
+def split_reply(reply):
+    """Too long for one chat message -> two messages joined by a newline (the 2nd is trimmed to fit)."""
+    if len(reply) <= MAX_CHARS:
+        return reply
+    first = fit(reply)
+    if first.endswith("..."):            # cut mid-sentence: continue from that word
+        first = first[:-3]
+    rest = reply[len(first):].strip()
+    return f"{first.strip()}\n{fit(rest)}" if rest else first
+
 def ago(ts):
     s = int(time.time() - ts)
     return f"{s}s" if s < 60 else f"{s // 60}m"
@@ -279,7 +295,7 @@ SYSTEM = (
     "Never start a reply with ! or / and never type chat commands. "
     f"You're running Opie AI version {VERSION}. Only mention it if someone asks what version you are. "
     f"If the viewer's message is genuinely insulting or hostile toward you, start your reply with {RUDE_TAG} (it gets stripped). Don't use it for normal ribbing. "
-    "Reply in plain text, one or two short sentences, under 170 characters total. No markdown, no lists, no emojis, no filler."
+    "Reply in plain text, one or two short sentences, under 170 characters. Only go longer if the question really needs it, and never past 350 characters. No markdown, no lists, no emojis, no filler."
 )
 
 MOOD_NOTES = {
@@ -307,10 +323,10 @@ def cmd_log(user, text):
     key = norm(user)
     def fn(state):
         # skip Opie's own messages echoing back through the bot account
-        if any(t == text for _, n, t in state["chat"][-10:] if n == BOT_NAME):
+        if any(text.strip() and text.strip() in t for _, n, t in state["chat"][-10:] if n == BOT_NAME):
             return None
-        is_command = text.lower().startswith(COMMAND)
-        # !opie-ai questions get scored in cmd_ask, so don't double count them here
+        is_command = text.startswith("!")
+        # never reply to commands (the bot handles those), and !opie-ai questions get scored in cmd_ask
         if not is_command:
             score_message(state, key, text, directed=False)
         add_chat(state, user, text)
@@ -359,9 +375,9 @@ def chime():
     text = re.sub(re.escape(RUDE_TAG), "", text, flags=re.I).strip()
     if not text:
         return
-    reply = fit(scrub(text))
+    reply = split_reply(scrub(text))
     write(reply, CHIME_OUT)
-    update_state(lambda state: add_chat(state, BOT_NAME, reply))
+    update_state(lambda state: add_chat(state, BOT_NAME, reply.replace("\n", " ")))
 
 def cmd_chime(setting):
     on = setting.lower() in ("on", "1", "yes", "true")
@@ -459,7 +475,7 @@ def respond(user, question, logged):
     if ok and not text:
         text = "Hmm, I've got nothing on that one."
 
-    reply = fit(f"@{user} {scrub(text)}")
+    reply = split_reply(f"@{user} {scrub(text)}")
 
     # --- remember what happened ---
     def finish(state):
@@ -471,7 +487,7 @@ def respond(user, question, logged):
             u["talked_at"] = time.time()
             if key not in EXEMPT:
                 u["cooldown"] = time.time()   # only start the cooldown if they actually got an answer
-        add_chat(state, BOT_NAME, reply)
+        add_chat(state, BOT_NAME, reply.replace("\n", " "))
     update_state(finish)
     return reply
 
