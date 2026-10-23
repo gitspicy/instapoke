@@ -14,7 +14,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "1.7"                          # bump when ask.py changes
+VERSION = "1.8"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -36,7 +36,7 @@ CHAT_CONTEXT = 25                        # most recent lines handed to the model
 USER_MEMORY = 3                          # past Q&A pairs remembered per user
 
 # --- talking to Opie without the command ---
-OPIE_NAMES = re.compile(r"(@?opie(ai|-ai)?\b)", re.I)   # a chat line mentioning one of these gets a reply
+OPIE_NAMES = re.compile(r"@?opie(ai|-ai)?\b|^\W*op\b", re.I)   # "opie" anywhere, or "op" to start a message, gets a reply
 FOLLOWUP_WINDOW = 180                    # seconds after a reply where the conversation counts as ongoing
 FOLLOWUP_COOLDOWN = 15                   # cooldown inside that window, so back-and-forth flows
 
