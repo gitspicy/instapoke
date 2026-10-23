@@ -7,6 +7,7 @@ Usage (wire these up in your stream bot):
     python ask.py --forgive <user>          mod command: reset a user's attitude (writes OUT)
     python ask.py --mood <user>             mod command: show a user's attitude (writes OUT)
     python ask.py --roast <user> <target>   roast someone using what they've said in chat (writes OUT)
+    python ask.py --status [uptime] [viewers] owner command: status report (writes OUT)
     python ask.py --chime on|off|status            mod command: let Opie butt into chat on his own (writes OUT)
 
 Every reply is also printed. --log prints nothing unless Opie decides to talk (a message
@@ -15,7 +16,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "2.5"                          # bump when ask.py changes
+VERSION = "2.6"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -40,6 +41,7 @@ USER_MEMORY = 3                          # past Q&A pairs remembered per user
 OPIE_NAMES = re.compile(r"@?opie(ai|-ai)?\b", re.I)   # a chat line mentioning one of these gets a reply
 NICKNAMES = re.compile(r"^\W*op\b", re.I)              # "op" to start a message...
 NICKNAME_USERS = {"steveyellowstream", "stevefromtheblock"}   # ...only works for these lowercase names
+STATUS_ASK = re.compile(r"^\W*(@?opie(ai|-ai)?|op)?\W*(status|status report|report|sitrep)\W*$", re.I)   # owners only
 FOLLOWUP_WINDOW = 180                    # seconds after a reply where the conversation counts as ongoing
 FOLLOWUP_COOLDOWN = 15                   # cooldown inside that window, so back-and-forth flows
 
@@ -402,6 +404,8 @@ def cmd_log(user, text):
         add_chat(state, user, text)
         if is_command:
             return None
+        if key in NICKNAME_USERS and STATUS_ASK.match(text) and (OPIE_NAMES.search(text) or NICKNAMES.search(text)):
+            return "status"
         if (OPIE_NAMES.search(text) or (key in NICKNAME_USERS and NICKNAMES.search(text))
                 or (EXPLOIT.search(text) and ABOUT_OPIE.search(text))):
             return "followup"
@@ -411,7 +415,9 @@ def cmd_log(user, text):
         return None
     action = update_state(fn)
 
-    if action == "followup":
+    if action == "status":
+        write(status_report(), CHIME_OUT)
+    elif action == "followup":
         reply = respond(user, text, logged=True)
         if reply:
             write(reply, CHIME_OUT)
@@ -541,6 +547,60 @@ def cmd_roast(user, target):
         add_chat(state, BOT_NAME, reply.replace("\n", " "))
     update_state(finish)
 
+def reachable(url):
+    try:
+        urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "opie-ai"}), timeout=2).close()
+        return True
+    except Exception:
+        return False
+
+def status_report(uptime="", viewers=""):
+    """Owner-only status report, packed into at most two chat messages."""
+    with StateLock():
+        state = load_state()
+        current_mood(state)              # roll the mood if it's due, so the report is current
+        save_state(state)
+        now = time.time()
+        grudges = sorted(((get_user(state, k)["dis"], k) for k in list(state["users"])
+                          if k not in EXEMPT and k not in BOT_ACCOUNTS), reverse=True)
+        grudges = [f"{k} {int(d)} ({level(d)})" for d, k in grudges if level(d) != "CHILL"][:4]
+        recent = [n for ts, n, _ in state["chat"] if now - ts <= 600 and n != BOT_NAME and norm(n) not in BOT_ACCOUNTS]
+        exploits = sum(u.get("exploits", 0) for u in state["users"].values())
+
+    hours = (state["mood_until"] - now) / 3600
+    top = max(set(recent), key=recent.count) if recent else None
+    spoke = int((now - state["spoke_at"]) / 60) if state["spoke_at"] else None
+    fields = [
+        f"Opie AI v{VERSION} status, boss:",
+        f"Mood: {state['mood']} (changes {'soon' if hours < 1 else f'in ~{round(hours)}h'})",
+        "On my list: " + (", ".join(grudges) if grudges else "nobody, I'm a saint today"),
+    ]
+    if uptime and not uptime.startswith("$"):
+        fields.append(f"Uptime: {uptime}")
+    if viewers and not viewers.startswith("$"):
+        fields.append(f"Viewers: {viewers}")
+    fields += [
+        f"Chat: {len(recent)} msgs in 10 min" + (f", loudest {top}" if top else ""),
+        f"Chime-ins: {'ON' if state['chime_on'] else 'OFF'}" + (f", last spoke {spoke}m ago" if spoke is not None else ""),
+        f"Hack attempts caught: {exploits}",
+        f"Brain ({MODEL}): {'OK' if reachable('http://localhost:11434/api/tags') else 'DOWN'}",
+        f"Search: {'OK' if reachable(SEARXNG_URL.rsplit('/', 1)[0]) else 'DOWN'}",
+    ]
+    # pack fields into up to two messages, dropping whatever doesn't fit at the end
+    msgs = [""]
+    for f in fields:
+        joined = f"{msgs[-1]} | {f}" if msgs[-1] and not msgs[-1].endswith(":") else f"{msgs[-1]} {f}".strip()
+        if len(joined) <= MAX_CHARS:
+            msgs[-1] = joined
+        elif len(msgs) < 2:
+            msgs.append(f)
+        else:
+            break
+    return "\n".join(msgs)
+
+def cmd_status(uptime, viewers):
+    write(status_report(uptime, viewers))
+
 def cmd_chime(setting):
     setting = setting.lower()
     if setting in ("on", "1", "yes", "true", "off", "0", "no", "false"):
@@ -581,6 +641,9 @@ def cmd_mood(user):
 def cmd_ask(user, question):
     if not question:
         write(f"@{user} ask me something! e.g. {COMMAND} what year did The Terminator come out?")
+        return
+    if norm(user) in NICKNAME_USERS and STATUS_ASK.match(question):
+        write(status_report())
         return
     reply = respond(user, question, logged=False)
     if reply:
@@ -722,6 +785,8 @@ if __name__ == "__main__":
         cmd_mood(user)
     elif flag == "--chime":
         cmd_chime(user)
+    elif flag == "--status":
+        cmd_status(*(args + ["", ""])[:2])
     elif flag == "--roast":
         cmd_roast(user, rest)
     else:
