@@ -1,4 +1,4 @@
-# Opie AI (v3.4)
+# Opie AI (v3.5)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -32,6 +32,7 @@ The first should print nothing. The second should print Opie's mood and edge.
 | `!ai <question>` (also `!opieai`, `!opie-ai`) | Opie answers. 60s cooldown per person |
 | Any message containing **opie** | Opie replies, no command needed. 15s cooldown while you're mid-conversation; ignored quietly on cooldown |
 | `!roast @user` | Opie roasts them using what they've said in chat. 2 min per asker, 5 min per target |
+| `!weirdnews` | **Opie's Weird News**: a real bizarre story from the past week, radio-style. 2 min cooldown (owners skip it) |
 
 ### Owners only (`SteveYellowstream`, `stevefromtheblock`)
 
@@ -71,6 +72,7 @@ Steps 3–4 are only needed where replies can run long (`!ai`, `!roast`, the cha
 | **Event: Chat Message Received** | `"D:\DOODA\streamscripts\ask.py" --log "$username" "$message"`. Wrap steps 2–4 in a Conditional: `$externalprogramresult` not blank |
 | `!ai`, `!opieai`, `!opie-ai` | `"D:\DOODA\streamscripts\ask.py" "$username" $allargs` |
 | `!roast` | `"D:\DOODA\streamscripts\ask.py" --roast "$username" "$arg1text"` |
+| `!weirdnews` | `"D:\DOODA\streamscripts\ask.py" --news "$username"` |
 | `!opie-mood` | `"D:\DOODA\streamscripts\ask.py" --mood "$username" $allargs` |
 | `!opie-forgive` | `"D:\DOODA\streamscripts\ask.py" --forgive "$arg1text"` |
 | `!opie-chime` | `"D:\DOODA\streamscripts\ask.py" --chime $arg1text` |
@@ -187,6 +189,15 @@ python ask.py --status "" ""
 | `CURRENCY` | `"N-persons"` | Currency name in gambling quips |
 | `BIG_LOSS` | `100000` | Loss size that triggers a quip |
 | `LOSS_PATTERN` | matches "Dang @bob, you lost 150000!" | Change if your loss messages are worded differently |
+
+### Weird News
+| Variable | Default | What it does |
+|---|---|---|
+| `NEWS_COOLDOWN` | `120` | Seconds between segments (owners skip it) |
+| `NEWS_QUERIES` | "weird news", "florida man", ... | Searches picked at random each time |
+| `NEWS_TIME_RANGE` | `"week"` | How recent: day, week, month or year |
+| `NEWS_REMEMBER` | `50` | Stories remembered so he doesn't repeat one |
+| `NEWS_SKIP` | death, kids, violence, ... | Stories mentioning these are skipped: tragedy isn't weird news |
 
 ### Attitude
 | Variable | Default | What it does |

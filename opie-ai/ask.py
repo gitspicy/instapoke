@@ -10,6 +10,7 @@ Usage (wire these up in your stream bot):
                                             edge 0-3: set the edge level (owners only) (writes OUT)
     python ask.py --roast <user> <target>   roast someone using what they've said in chat (writes OUT)
     python ask.py --status [uptime] [viewers] owner command: status report (writes OUT)
+    python ask.py --news <user>             Opie's Weird News: a real bizarre story from the past week (writes OUT)
     python ask.py --chime on|off|status            mod command: let Opie butt into chat on his own (writes OUT)
 
 Every reply is also printed. --log prints nothing unless Opie decides to talk (a message
@@ -18,7 +19,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, urllib.request, urllib.parse
 
-VERSION = "3.4"                          # bump when ask.py changes
+VERSION = "3.5"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -127,6 +128,18 @@ MOOD_MAX_HOURS = 10
 ROAST_COOLDOWN = 120                     # seconds before the same person can call another roast
 ROAST_TARGET_COOLDOWN = 300              # seconds before the same person can be roasted again (stops pile-ons)
 ROAST_LINES = 15                         # how many of the target's recent chat lines Opie gets to work with
+
+# --- Opie's Weird News ---
+NEWS_COOLDOWN = 120                      # seconds between segments (owners skip it)
+NEWS_QUERIES = [                         # one is picked at random each time
+    "weird news", "bizarre news", "odd news", "offbeat news", "strange but true news",
+    "florida man", "unusual news story", "wacky news", "only in america news", "you won't believe this news",
+]
+NEWS_TIME_RANGE = "week"                 # day, week, month or year
+NEWS_REMEMBER = 50                       # stories remembered so he doesn't repeat himself
+NEWS_SKIP = re.compile(                  # tragedy isn't weird news: skip stories like these
+    r"\b(kill(ed|s|ing)?|dies|died|dead|death|murder\w*|shoot\w*|shot|stabb\w*|rape\w*|abus\w*|"
+    r"child|children|kid|kids|baby|toddler|suicide|overdose|massacre|war|terror\w*|hostage)\b", re.I)
 
 # --- gambling commentary ---
 CURRENCY = "N-persons"
@@ -362,6 +375,32 @@ def web_search(query):
         return "\n".join(chunks)
     except Exception:
         return ""
+
+def news_search():
+    """A random weird news story from the past week that Opie hasn't covered yet.
+    Returns (title, snippet, url), "down" if search is unreachable, or None if nothing fresh turned up."""
+    with StateLock():
+        seen = set(load_state().get("news_seen", []))
+    queries = random.sample(NEWS_QUERIES, len(NEWS_QUERIES))
+    for query in queries[:3]:
+        try:
+            url = SEARXNG_URL + "?" + urllib.parse.urlencode(
+                {"q": query, "format": "json", "categories": "news", "time_range": NEWS_TIME_RANGE})
+            req = urllib.request.Request(url, headers={"User-Agent": "opie-ai"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                results = json.load(resp).get("results", [])
+        except Exception:
+            return "down"
+        stories = []
+        for r in results:
+            title = re.sub(r"\s+", " ", r.get("title", "") or "").strip()
+            snippet = re.sub(r"\s+", " ", r.get("content", "") or "").strip()[:SNIPPET_CHARS]
+            link = r.get("url", "")
+            if title and snippet and link not in seen and not NEWS_SKIP.search(f"{title} {snippet}"):
+                stories.append((title, snippet, link))
+        if stories:
+            return random.choice(stories[:10])
+    return None
 
 def ollama(messages):
     payload = {
@@ -718,6 +757,58 @@ def stream_report():
 def cmd_status(uptime, viewers):
     write(status_report(uptime, viewers))
 
+def cmd_news(user):
+    user = user.lstrip("@")
+    key = norm(user)
+    def check(state):
+        wait = NEWS_COOLDOWN - (time.time() - state.get("news_at", 0))
+        if key not in OWNERS and wait > 0:
+            return {"wait": wait}
+        state["news_at"] = time.time()   # claim it now so two requests at once don't both run
+        return {"mood": current_mood(state)}
+    ctx = update_state(check)
+    if "wait" in ctx:
+        write(f"@{user} the weird news van is still out, next bulletin in {int(ctx['wait']) + 1}s")
+        return
+
+    def refund(state):                   # nothing aired, so don't burn the cooldown
+        state["news_at"] = 0
+    story = news_search()
+    if not story or story == "down":
+        update_state(refund)
+        write("Opie's Weird News is off the air, the wire's down. Probably Antman tripped over the cord." if story
+              else "Opie's Weird News: slow week, nothing weird enough for me. The world's gone boring, brothaman.")
+        return
+    title, snippet, link = story
+    source = urllib.parse.urlparse(link).netloc.removeprefix("www.")
+
+    system = (f"{SYSTEM} {ctx['mood']} You're doing your radio segment 'Opie's Weird News'. "
+              "Start with 'Opie's Weird News:' then tell the story in your own words in one or two sentences, "
+              "sticking to the real facts given (don't invent details), then add one short jab or hot take. "
+              "Make fun of how absurd it is, never of anyone who got hurt.")
+    try:
+        text = re.sub(r"\s+", " ", ollama([
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Headline: {title}\nDetails: {snippet}"},
+        ])).strip()
+        text = RUDE_LEAD.sub("", re.sub(re.escape(RUDE_TAG), "", text, flags=re.I)).strip()
+    except Exception:
+        text = ""
+    if not text:
+        update_state(refund)
+        write("Opie's Weird News is off the air, my brain's offline for a sec.")
+        return
+    text = scrub(text)
+    if not text.lower().startswith("opie's weird news"):
+        text = f"Opie's Weird News: {text}"
+    reply = split_reply(f"{text} (via {source})" if source else text)
+    write(reply)
+
+    def finish(state):
+        state["news_seen"] = (state.get("news_seen", []) + [link])[-NEWS_REMEMBER:]
+        add_chat(state, BOT_NAME, reply.replace("\n", " "))
+    update_state(finish)
+
 def cmd_chime(setting):
     setting = setting.lower()
     if setting in ("on", "1", "yes", "true", "off", "0", "no", "false"):
@@ -946,6 +1037,8 @@ if __name__ == "__main__":
         cmd_chime(user)
     elif flag == "--status":
         cmd_status(*(args + ["", ""])[:2])
+    elif flag == "--news":
+        cmd_news(user)
     elif flag == "--roast":
         cmd_roast(user, rest)
     else:
