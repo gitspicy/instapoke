@@ -587,11 +587,14 @@ def status_report(uptime="", viewers=""):
     # pack fields into up to two messages; anything that doesn't fit is skipped, so put the important stuff first
     msgs = [""]
     for f in fields:
-        joined = f"{msgs[-1]} | {f}" if msgs[-1] and not msgs[-1].endswith(":") else f"{msgs[-1]} {f}".strip()
-        if len(joined) <= MAX_CHARS:
-            msgs[-1] = joined
-        elif len(msgs) < 2:
-            msgs.append(f)
+        for i, m in enumerate(msgs):
+            joined = f"{m} | {f}" if m and not m.endswith(":") else f"{m} {f}".strip()
+            if len(joined) <= MAX_CHARS:
+                msgs[i] = joined
+                break
+        else:
+            if len(msgs) < 2:
+                msgs.append(f)
     return "\n".join(msgs)
 
 def cmd_status(uptime, viewers):
