@@ -14,7 +14,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "1.9"                          # bump when ask.py changes
+VERSION = "2.0"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -50,8 +50,24 @@ CHIME_ACTIVE_WINDOW = 120                # "lively" means at least...
 CHIME_ACTIVE_LINES = 8                   # ...this many lines in that many seconds
 CHIME_CHANCE = 0.15                      # odds per qualifying message
 
+# --- daily moods: one at a time, swaps to a different random one every few hours ---
+MOODS = {
+    "bitter": "You're extra bitter today: everything reminds you of how you got screwed over, and you hold grudges hard.",
+    "manic": "You're manic today: wired, fast-talking, way too excited about everything, jumping between ideas mid-sentence.",
+    "wine-drunk": "You're wine-drunk today: a little slurry, sloppy and sentimental, you keep mentioning your glass and lose your train of thought.",
+    "nostalgic": "You're nostalgic today: every answer drifts back to your glory days on the radio and how much better things used to be.",
+}
+MOOD_MIN_HOURS = 5
+MOOD_MAX_HOURS = 10
+
+# --- gambling commentary ---
+CURRENCY = "N-persons"
+BIG_LOSS = 100000                        # a loss this big (or bigger) gets a snarky quip
+LOSS_PATTERN = re.compile(r"@([\w.\-]+)\W+you lost ([\d,]+)", re.I)   # matches "Dang @bob, you lost 150000!"
+
 # --- disobedience (0-100 per user) ---
-DECAY_PER_MIN = 0.5                      # points forgiven per minute of good behaviour
+GRUDGE_HOURS = 24                        # a maxed-out grudge (100) takes this long to fade to 0
+DECAY_PER_MIN = 100 / (GRUDGE_HOURS * 60)    # points forgiven per minute of good behaviour
 INSULT_POINTS = 15                       # insult aimed at Opie
 SEVERE_POINTS = 40                       # really nasty stuff
 SPAM_POINTS = 5                          # same message 3+ times in recent chat
@@ -198,6 +214,14 @@ def bump(state, key, points):
 def level(score):
     return next(name for floor, name in LEVELS if score >= floor)
 
+def current_mood(state):
+    """Opie's mood of the day; rolls a different one when the current one runs out."""
+    now = time.time()
+    if state.get("mood") not in MOODS or now >= state.get("mood_until", 0):
+        state["mood"] = random.choice([m for m in MOODS if m != state.get("mood")])
+        state["mood_until"] = now + random.uniform(MOOD_MIN_HOURS, MOOD_MAX_HOURS) * 3600
+    return MOODS[state["mood"]]
+
 def add_chat(state, user, text):
     state["chat"].append([time.time(), user, text[:600 if user == BOT_NAME else 300]])
     del state["chat"][:-CHAT_KEEP]
@@ -335,6 +359,9 @@ def cmd_log(user, text):
         # other bot posts (gamble results etc.) are worth remembering, but never scored or answered
         if key in BOT_ACCOUNTS:
             add_chat(state, user, text)
+            loss = LOSS_PATTERN.search(text)
+            if loss and int(loss.group(2).replace(",", "")) >= BIG_LOSS:
+                return ("loss", loss.group(1), loss.group(2))
             return None
         is_command = text.startswith("!")
         # never reply to commands (the bot handles those), and !opie-ai questions get scored in cmd_ask
@@ -357,6 +384,10 @@ def cmd_log(user, text):
             write(reply, CHIME_OUT)
     elif action == "chime":
         chime()
+    elif action and action[0] == "loss":
+        _, loser, amount = action
+        blurt(f"{loser} just lost {amount} {CURRENCY} gambling. Give ONE short snarky quip mocking them for it, "
+              f"starting with @{loser}. Don't ask a question back.", "")
 
 def wants_to_chime(state):
     now = time.time()
@@ -366,16 +397,20 @@ def wants_to_chime(state):
     return active >= CHIME_ACTIVE_LINES and random.random() < CHIME_CHANCE
 
 def chime():
+    blurt(CHIME_PROMPT, "People who've been mean to you lately (fair game for a shot): ")
+
+def blurt(prompt, grudge_note):
+    """Opie says something nobody asked for (a chime-in or a gambling quip), posted via CHIME_OUT."""
     def gather(state):
         chat = [f"{n}: {t}" for _, n, t in state["chat"][-CHAT_CONTEXT:]]
         grudges = [k for k, u in state["users"].items()
                    if k not in EXEMPT and level(get_user(state, k)["dis"]) != "CHILL"]
-        return chat, grudges
-    chat, grudges = update_state(gather)
+        return chat, grudges, current_mood(state)
+    chat, grudges, mood = update_state(gather)
 
-    system = SYSTEM + " " + CHIME_PROMPT
-    if grudges:
-        system += " People who've been mean to you lately (fair game for a shot): " + ", ".join(grudges[:5]) + "."
+    system = f"{SYSTEM} {mood} {prompt}"
+    if grudges and grudge_note:
+        system += " " + grudge_note + ", ".join(grudges[:5]) + "."
     try:
         text = re.sub(r"\s+", " ", ollama([
             {"role": "system", "content": system},
@@ -443,7 +478,8 @@ def respond(user, question, logged):
                     bump(state, key, IMPATIENT_POINTS)
                 return {"wait": wait}
         chat = [f"[{ago(ts)} ago] {n}: {t}" for ts, n, t in state["chat"][-CHAT_CONTEXT:]]
-        return {"mood": mood, "chat": chat, "memory": list(u.get("memory", [])), "total": len(state["chat"])}
+        return {"mood": mood, "chat": chat, "memory": list(u.get("memory", [])), "total": len(state["chat"]),
+                "daily": current_mood(state)}
     ctx = update_state(prepare)
 
     if "wait" in ctx:
@@ -455,7 +491,7 @@ def respond(user, question, logged):
         mood = "MUTINY"
 
     # --- build the prompt ---
-    system = SYSTEM
+    system = SYSTEM + " " + ctx["daily"]
     if MOOD_NOTES[mood]:
         system += " " + MOOD_NOTES[mood]
     messages = [{"role": "system", "content": system}]
