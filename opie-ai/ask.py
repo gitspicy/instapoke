@@ -16,7 +16,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "2.7"                          # bump when ask.py changes
+VERSION = "2.8"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -572,6 +572,8 @@ def status_report(uptime="", viewers=""):
     fields = [
         f"Opie AI v{VERSION} status, boss:",
         f"Mood: {state['mood']} (changes {'soon' if hours < 1 else f'in ~{round(hours)}h'})",
+        f"Brain: {'OK' if reachable('http://localhost:11434/api/tags') else 'DOWN'}, "
+        f"Search: {'OK' if reachable(SEARXNG_URL.rsplit('/', 1)[0]) else 'DOWN'}",
         "On my list: " + (", ".join(grudges) if grudges else "nobody, I'm a saint today"),
     ]
     if uptime and not uptime.startswith("$"):
@@ -581,10 +583,8 @@ def status_report(uptime="", viewers=""):
     fields += [
         f"Chat: {len(recent)} msgs in 10 min" + (f", loudest {top}" if top else ""),
         f"Chime-ins: {'ON' if state['chime_on'] else 'OFF'}" + (f", last spoke {spoke}m ago" if spoke is not None else ""),
-        f"Brain ({MODEL}): {'OK' if reachable('http://localhost:11434/api/tags') else 'DOWN'}",
-        f"Search: {'OK' if reachable(SEARXNG_URL.rsplit('/', 1)[0]) else 'DOWN'}",
     ]
-    # pack fields into up to two messages, dropping whatever doesn't fit at the end
+    # pack fields into up to two messages; anything that doesn't fit is skipped, so put the important stuff first
     msgs = [""]
     for f in fields:
         joined = f"{msgs[-1]} | {f}" if msgs[-1] and not msgs[-1].endswith(":") else f"{msgs[-1]} {f}".strip()
@@ -592,8 +592,6 @@ def status_report(uptime="", viewers=""):
             msgs[-1] = joined
         elif len(msgs) < 2:
             msgs.append(f)
-        else:
-            break
     return "\n".join(msgs)
 
 def cmd_status(uptime, viewers):
