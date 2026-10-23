@@ -14,9 +14,9 @@ Every reply is also printed. --log prints nothing unless Opie decides to talk (a
 mentioning him, or an unprompted chime-in), so a bot can post the output whenever it isn't empty.
 Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
-import sys, os, re, json, time, random, urllib.request, urllib.parse
+import sys, os, io, re, json, time, random, logging, contextlib, urllib.request, urllib.parse
 
-VERSION = "2.8"                          # bump when ask.py changes
+VERSION = "2.9"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -124,6 +124,11 @@ CHAT_QUESTION = re.compile(r"\b(chat|earlier|said|say|saying|talking about|menti
 
 # --- local web search (SearXNG running in Docker) ---
 SEARXNG_URL = "http://localhost:8080/search"
+
+# --- OBS stream stats for the status report (needs: pip install obsws-python) ---
+OBS_HOST = "localhost"
+OBS_PORT = 4455                          # OBS: Tools > WebSocket Server Settings
+OBS_PASSWORD_FILE = "obs_password.txt"   # put the WebSocket password in this file next to ask.py
 SEARCH_RESULTS = 4                       # how many results to feed the model
 SNIPPET_CHARS = 400                      # chars kept from each result
 
@@ -554,6 +559,41 @@ def reachable(url):
     except Exception:
         return False
 
+def obs_stats():
+    """Live stream health from OBS. Returns (summary text, uptime or "")."""
+    try:
+        import obsws_python as obs
+    except ImportError:
+        return "OBS: run pip install obsws-python", ""
+    logging.getLogger("obsws_python").setLevel(logging.CRITICAL + 1)   # its logs include the password
+    try:
+        with open(os.path.join(HERE, OBS_PASSWORD_FILE), encoding="utf-8") as f:
+            password = f.read().strip()
+    except OSError:
+        password = ""
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            client = obs.ReqClient(host=OBS_HOST, port=OBS_PORT, password=password, timeout=3)
+            try:
+                first, t1 = client.get_stream_status(), time.time()
+                stats = client.get_stats()
+                if not first.output_active:
+                    return f"OBS: not live, CPU {stats.cpu_usage:.0f}%, {stats.active_fps:.0f} fps", ""
+                time.sleep(1)                # bitrate = bytes sent over one second
+                second, t2 = client.get_stream_status(), time.time()
+            finally:
+                client.disconnect()
+    except Exception as e:
+        msg = str(e).lower()
+        wrong_pw = "auth" in msg or "identify" in msg
+        return ("OBS: wrong WebSocket password" if wrong_pw else "OBS: not connected"), ""
+    kbps = (second.output_bytes - first.output_bytes) * 8 / 1000 / max(t2 - t1, 0.1)
+    dropped = 100 * second.output_skipped_frames / max(second.output_total_frames, 1)
+    health = " RECONNECTING" if second.output_reconnecting else " (congested)" if second.output_congestion > 0.5 else ""
+    uptime = second.output_timecode.split(".")[0]
+    return (f"Stream: {kbps:.0f} kbps, {dropped:.1f}% dropped, {stats.active_fps:.0f} fps, "
+            f"CPU {stats.cpu_usage:.0f}%{health}"), uptime
+
 def status_report(uptime="", viewers=""):
     """Owner-only status report, packed into at most two chat messages."""
     with StateLock():
@@ -567,6 +607,8 @@ def status_report(uptime="", viewers=""):
         recent = [n for ts, n, _ in state["chat"] if now - ts <= 600 and n != BOT_NAME and norm(n) not in BOT_ACCOUNTS]
 
     hours = (state["mood_until"] - now) / 3600
+    stream, obs_uptime = obs_stats()
+    uptime = obs_uptime or uptime
     top = max(set(recent), key=recent.count) if recent else None
     spoke = int((now - state["spoke_at"]) / 60) if state["spoke_at"] else None
     fields = [
@@ -574,6 +616,7 @@ def status_report(uptime="", viewers=""):
         f"Mood: {state['mood']} (changes {'soon' if hours < 1 else f'in ~{round(hours)}h'})",
         f"Brain: {'OK' if reachable('http://localhost:11434/api/tags') else 'DOWN'}, "
         f"Search: {'OK' if reachable(SEARXNG_URL.rsplit('/', 1)[0]) else 'DOWN'}",
+        stream,
         "On my list: " + (", ".join(grudges) if grudges else "nobody, I'm a saint today"),
     ]
     if uptime and not uptime.startswith("$"):
