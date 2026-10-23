@@ -554,8 +554,10 @@ def cmd_chime(setting):
     with StateLock():
         state = load_state()
     if state["chime_on"]:
-        quiet = int((time.time() - state["spoke_at"]) / 60)
-        write(f"Chime-ins are ON. I last opened my mouth {quiet} min ago. Use on/off to change it.")
+        mins = int((time.time() - state["spoke_at"]) / 60)
+        last = ("I haven't said a word yet" if not state["spoke_at"] else
+                f"I last opened my mouth {mins} min ago" if mins < 120 else f"I last opened my mouth {mins // 60} hours ago")
+        write(f"Chime-ins are ON. {last}. Use on/off to change it.")
     else:
         write("Chime-ins are OFF. I'm muzzled, brothaman. Use on/off to change it.")
 
