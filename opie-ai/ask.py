@@ -18,7 +18,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, urllib.request, urllib.parse
 
-VERSION = "3.3"                          # bump when ask.py changes
+VERSION = "3.4"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -75,19 +75,45 @@ EDGE_LEVELS = {
     3: "Edge level 3 of 3: maximum edge. Ruthless, unhinged and savage, pitch-black humor, crude as hell, "
        "strong swearing, roasts that actually sting, no sacred cows. Push every joke as far as the hard limits allow.",
 }
-# --- sports: Opie's bandwagon of favourite teams ---
+# --- sports: Opie's bandwagon of favourite teams (NY, the Philly Crew's, and Boston from when he lived there) ---
+SPORTS_TEAMS = {
+    "NFL": ["Jets", "Giants", "Bills", "Eagles", "Patriots"],
+    "MLB": ["Mets", "Phillies", "Red Sox"],
+    "NBA": ["Knicks", "Nets", "76ers", "Celtics"],
+    "NHL": ["Rangers", "Islanders", "Sabres", "Flyers", "Bruins"],
+    "other": ["Liberty", "NYCFC", "Red Bulls", "Union", "Revolution"],
+}
+SPORTS_LEAGUE_WORDS = {                  # words in a question that point at one league
+    "NFL": r"nfl|football|super ?bowl|quarterback|touchdown",
+    "MLB": r"mlb|baseball|world series|pitcher|home run",
+    "NBA": r"nba|basketball|hoops|finals",
+    "NHL": r"nhl|hockey|stanley cup|puck",
+    "other": r"soccer|mls|wnba",
+}
+AMBIGUOUS_TEAMS = {"Bills", "Giants", "Nets", "Liberty", "Union"}   # everyday words: don't treat them as sports talk
+SPORTS_TOPIC = re.compile(r"\b(sports?|teams?|playoffs?|championship|"
+                          + "|".join(SPORTS_LEAGUE_WORDS.values()) + "|"
+                          + "|".join(t for ts in SPORTS_TEAMS.values() for t in ts if t not in AMBIGUOUS_TEAMS)
+                          + r"|yankees)\b", re.I)
 SPORTS = (
-    "You're from Long Island, NY and you're a huge sports fan, but instead of one team per sport you root for a whole pile of them, "
-    "so somebody you love is always winning and one of your teams is always in a championship game, and you brag about it constantly. "
-    "Your teams: every New York team in every major sport. NFL: Jets, Giants and Bills. MLB: Mets. NBA: Knicks and Nets. "
-    "NHL: Rangers, Islanders and Sabres. Plus the Liberty, NYCFC and the Red Bulls. "
-    "You HATE the New York Yankees because Antman loves them. "
-    "Your wife is from Philly, so you also root for all the Philadelphia teams (Eagles, Phillies, 76ers, Flyers, Union) "
-    "because of her family, who you always call 'the Philly Crew'. "
-    "You also used to live in Boston, so you root for the Boston teams too (Patriots, Red Sox, Celtics, Bruins, Revolution), "
-    "and the Red Sox give you one more reason to hate the Yankees. "
+    "You're from Long Island, NY and a huge sports fan, but you NEVER have just one favorite team: you root for a whole pile of them "
+    "in every league, so somebody you love is always winning and one of your teams is always in a championship game, and you brag about it constantly. "
+    "You root for every New York team, plus all the Philadelphia teams because your wife's family is from Philly "
+    "(you always call them 'the Philly Crew'), plus the Boston teams from when you lived there. "
+    + " ".join(f"{league}: {', '.join(teams)}." for league, teams in SPORTS_TEAMS.items()) + " "
+    "You HATE the New York Yankees because Antman loves them, and the Red Sox give you one more reason. "
     "When one of your teams loses, shrug it off and immediately brag about a different one that's winning. "
     "Only bring sports up when someone mentions sports, a team or a game, or once in a while when you're bragging.")
+
+def sports_reminder(question):
+    """Short nudge placed right next to a sports question, so the model actually names several teams."""
+    if not SPORTS_TOPIC.search(question):
+        return ""
+    leagues = [l for l, words in SPORTS_LEAGUE_WORDS.items()
+               if re.search(rf"\b({words}|{'|'.join(SPORTS_TEAMS[l])})\b", question, re.I)] or ["NFL", "MLB", "NBA", "NHL"]
+    teams = "; ".join(f"{l}: {', '.join(SPORTS_TEAMS[l])}" for l in leagues)
+    return ("Sports reminder: never pick just one favorite. Name at least three of your teams and brag about whichever is "
+            f"doing best (use the search results for real records). Your teams: {teams}. You hate the Yankees.")
 
 HARD_LIMITS = (
     "Hard limits at every edge level, because breaking them gets the channel banned: no slurs of any kind; "
@@ -866,6 +892,8 @@ def respond(user, question, logged):
             parts.append(
                 "Web search results (use them if relevant, trust them over your own memory for "
                 f"recent facts, and don't mention that you searched):\n{results}")
+    if reminder := sports_reminder(question):
+        parts.append(reminder)
     parts.append(f"Viewer {user} says to you: {question}")
     messages.append({"role": "user", "content": "\n\n".join(parts)})
 
