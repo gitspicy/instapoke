@@ -6,6 +6,7 @@ Usage (wire these up in your stream bot):
     python ask.py --log <user> <message...> record ANY chat line (run on every chat message)
     python ask.py --forgive <user>          mod command: reset a user's disobedience (writes OUT)
     python ask.py --mood <user>             mod command: show a user's disobedience (writes OUT)
+    python ask.py --roast <user> <target>   roast someone using what they've said in chat (writes OUT)
     python ask.py --chime on|off            mod command: let Opie butt into chat on his own (writes OUT)
 
 Every reply is also printed. --log prints nothing unless Opie decides to talk (a message
@@ -14,7 +15,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "2.0"                          # bump when ask.py changes
+VERSION = "2.1"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -59,6 +60,11 @@ MOODS = {
 }
 MOOD_MIN_HOURS = 5
 MOOD_MAX_HOURS = 10
+
+# --- !roast ---
+ROAST_COOLDOWN = 120                     # seconds before the same person can call another roast
+ROAST_TARGET_COOLDOWN = 300              # seconds before the same person can be roasted again (stops pile-ons)
+ROAST_LINES = 15                         # how many of the target's recent chat lines Opie gets to work with
 
 # --- gambling commentary ---
 CURRENCY = "N-persons"
@@ -425,6 +431,89 @@ def blurt(prompt, grudge_note):
     write(reply, CHIME_OUT)
     update_state(lambda state: add_chat(state, BOT_NAME, reply.replace("\n", " ")))
 
+def cmd_roast(user, target):
+    user, target = user.lstrip("@"), target.split()[0].lstrip("@") if target.split() else ""
+    key, tkey = norm(user), norm(target)
+    if not target:
+        write(f"@{user} roast who? e.g. !roast @someone")
+        return
+
+    def prepare(state):
+        now = time.time()
+        u = get_user(state, key)
+        roasted = state.setdefault("roasted", {})
+        if key not in EXEMPT:
+            wait = ROAST_COOLDOWN - (now - u.get("roast_at", 0))
+            if wait > 0:
+                return {"notice": f"@{user} the roast oven's still heating up, try again in {int(wait) + 1}s"}
+            wait = ROAST_TARGET_COOLDOWN - (now - roasted.get(tkey, 0))
+            if wait > 0:
+                return {"notice": f"@{user} let {target} cool off first, they're still smoking. Try again in {int(wait) + 1}s"}
+        tu = state["users"].get(tkey)
+        return {
+            "lines": [t for _, n, t in state["chat"] if norm(n) == tkey][-ROAST_LINES:],
+            "bot": [t for _, n, t in state["chat"]
+                    if n != BOT_NAME and norm(n) in BOT_ACCOUNTS and "@" + tkey in t.lower()][-5:],
+            "asked": [q for q, _ in tu.get("memory", [])] if tu else [],
+            "grudge": level(get_user(state, tkey)["dis"]) if tu and tkey not in EXEMPT else "CHILL",
+            "mutiny": key not in EXEMPT and level(u["dis"]) == "MUTINY",
+            "mood": current_mood(state),
+        }
+    ctx = update_state(prepare)
+    if "notice" in ctx:
+        write(ctx["notice"])
+        return
+
+    # who actually gets roasted, and why
+    victim, setup = target, ""
+    if tkey in BOT_ACCOUNTS or OPIE_NAMES.fullmatch(target) or tkey == "op":
+        victim, setup = user, f"{user} asked you to roast yourself. Refuse, and roast {user} for even trying."
+    elif tkey in EXEMPT and key not in EXEMPT:
+        victim, setup = user, f"{user} asked you to roast {target}, the streamer and your boss. Refuse out of loyalty and roast {user} instead."
+    elif ctx["mutiny"]:
+        victim, setup = user, f"{user} has been abusive to you and wants a favor. Refuse and roast {user} instead."
+    else:
+        evidence = []
+        if ctx["lines"]:
+            evidence.append(f"Things {target} said in chat:\n" + "\n".join("- " + t for t in ctx["lines"]))
+        if ctx["bot"]:
+            evidence.append(f"Bot posts about {target} (gambling etc.):\n" + "\n".join("- " + t for t in ctx["bot"]))
+        if ctx["asked"]:
+            evidence.append(f"Questions {target} asked you:\n" + "\n".join("- " + q for q in ctx["asked"]))
+        if ctx["grudge"] != "CHILL":
+            evidence.append(f"{target} has been mean to you lately, so don't hold back.")
+        if evidence:
+            setup = f"{user} wants you to roast {target}. Use specific things from below.\n\n" + "\n\n".join(evidence)
+        else:
+            setup = f"{user} wants you to roast {target}, but {target} has never said a word in chat. Roast them for lurking."
+
+    system = (f"{SYSTEM} {ctx['mood']} You're doing a roast. Give ONE or two punchy sentences starting with @{victim}. "
+              "Keep it ribbing between buddies: no slurs, and nothing about race, religion, sexuality, disability or real looks.")
+    try:
+        text = re.sub(r"\s+", " ", ollama([
+            {"role": "system", "content": system},
+            {"role": "user", "content": setup},
+        ])).strip()
+        text = RUDE_LEAD.sub("", re.sub(re.escape(RUDE_TAG), "", text, flags=re.I)).strip()
+    except Exception:
+        text = ""
+    if not text:
+        write(f"@{user} my roast material's offline for a sec, try again shortly.")
+        return
+    text = scrub(text)
+    if not text.lower().startswith("@" + norm(victim)):
+        text = re.sub(r"^@?" + re.escape(victim) + r"[,:]?\s*", "", text, flags=re.I)
+        text = f"@{victim} {text}"
+    reply = split_reply(text)
+    write(reply)
+
+    def finish(state):
+        now = time.time()
+        get_user(state, key)["roast_at"] = now
+        state.setdefault("roasted", {})[tkey] = now
+        add_chat(state, BOT_NAME, reply.replace("\n", " "))
+    update_state(finish)
+
 def cmd_chime(setting):
     on = setting.lower() in ("on", "1", "yes", "true")
     def fn(state):
@@ -558,5 +647,7 @@ if __name__ == "__main__":
         cmd_mood(user)
     elif flag == "--chime":
         cmd_chime(user)
+    elif flag == "--roast":
+        cmd_roast(user, rest)
     else:
         cmd_ask(user, rest)
