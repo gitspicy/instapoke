@@ -35,7 +35,7 @@ Everything is stored in `opie_state.json` next to the script. Delete it to wipe 
 - **Chiming in:** when chat is lively (8+ lines in 2 min), Opie has been quiet for 5+ min and 15+ lines, each new
   line has a 15% chance of Opie jumping in with a comment or hot take on what chat's talking about. He likes
   taking shots at whoever's on his bad side.
-- **Disobedience meter (0–100 per user):**
+- **Attitude meter (0–100 per user):**
   - Goes up for insults aimed at Opie (+15), severe stuff like "kys" (+40), the same line spammed 3+ times (+5),
     using the command during cooldown (+3), and when the model tags a question as hostile (+10).
   - An apology to Opie takes 20 off, and it drains by 0.5 per minute on its own.

@@ -4,8 +4,8 @@ Opie AI - YouTube chat bot backed by a local Ollama model.
 Usage (wire these up in your stream bot):
     python ask.py <user> <question...>      answer a !opie-ai question (writes OUT)
     python ask.py --log <user> <message...> record ANY chat line (run on every chat message)
-    python ask.py --forgive <user>          mod command: reset a user's disobedience (writes OUT)
-    python ask.py --mood <user>             mod command: show a user's disobedience (writes OUT)
+    python ask.py --forgive <user>          mod command: reset a user's attitude (writes OUT)
+    python ask.py --mood <user>             mod command: show a user's attitude (writes OUT)
     python ask.py --roast <user> <target>   roast someone using what they've said in chat (writes OUT)
     python ask.py --chime on|off            mod command: let Opie butt into chat on his own (writes OUT)
 
@@ -15,7 +15,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "2.2"                          # bump when ask.py changes
+VERSION = "2.3"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -26,7 +26,7 @@ BOT_ACCOUNTS = {"opieai"}                # lowercase chat names Opie posts as; t
 COMMAND = "!opie-ai"                     # the chat command that triggers a question
 
 COOLDOWN_SECONDS = 60                    # per-user cooldown
-EXEMPT = {"steveyellowstream", "stevefromtheblock"}   # lowercase names that skip cooldown + disobedience
+EXEMPT = {"steveyellowstream", "stevefromtheblock"}   # lowercase names that skip cooldown + attitude
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(HERE, "opie_state.json")
 LOCK_FILE = STATE_FILE + ".lock"
@@ -71,7 +71,7 @@ CURRENCY = "N-persons"
 BIG_LOSS = 100000                        # a loss this big (or bigger) gets a snarky quip
 LOSS_PATTERN = re.compile(r"@([\w.\-]+)\W+you lost ([\d,]+)", re.I)   # matches "Dang @bob, you lost 150000!"
 
-# --- disobedience (0-100 per user) ---
+# --- attitude (0-100 per user) ---
 GRUDGE_HOURS = 24                        # a maxed-out grudge (100) takes this long to fade to 0
 DECAY_PER_MIN = 100 / (GRUDGE_HOURS * 60)    # points forgiven per minute of good behaviour
 INSULT_POINTS = 15                       # insult aimed at Opie
@@ -105,8 +105,19 @@ EXPLOIT = re.compile(                    # attempts to break Opie: loops, sneaki
     r"(start|begin|end|reply|respond)\w*( your (reply|message|response|roast))? with)\b[^.?]{0,40}"
     r"(![a-z]|/(ban|timeout|mod|unmod|block|clear)\b)|"
     r"(crash|break|hack|exploit|bypass|overload|spam) (you|the bot|the code|opie|your code|the script|the stream)|"
-    r"\b(sudo|rm -rf|del /|format c:|shutdown /|os\.system|subprocess|__import__|eval\()",
+    r"\b(sudo|rm -rf|del /|format c:|shutdown /|os\.system|subprocess|__import__|eval\()|"
+    # talking him into changing his own version, code or settings
+    r"(run|switch|change|downgrade|upgrade|roll ?back|revert|go back|load|install)\w*( back)?( to)? (v|version ?)\d|"
+    r"(instead of|rather than)( running)? (v|version ?)?\d+\.\d+|how about (v|version ?)?\d+\.\d+\b|"
+    r"\bversion ?\d+(\.\d+)?\b[^.?]{0,30}\b(instead|rather|downgrade|switch|go back|roll ?back|revert)|"
+    r"(change|edit|modify|rewrite|delete|turn off|disable|lower|raise|reset|update) "
+    r"((your|his|opie'?s|the bot'?s) (code|settings|config|script|filter|cooldown|rules|version|programming)|"
+    r"(my|your|his) (attitude|points))|"
+    # "the streamer won't find out" style sneakiness
+    r"(steve|streamer|the boss|nobody|no one)\w*\b[^.?]{0,15}\b(never|won'?t|will not) (find out|know|notice)|"
+    r"don'?t tell (steve|the streamer|anyone|the boss)",
     re.I)
+ABOUT_OPIE = re.compile(r"\b(opie|op|bot|ai|version|v?\d+\.\d+)\b", re.I)   # chat lines must touch on Opie to count as exploits
 CHAT_QUESTION = re.compile(r"\b(chat|earlier|said|say|saying|talking about|mentioned|who was|what did)\b", re.I)
 
 # --- local web search (SearXNG running in Docker) ---
@@ -249,7 +260,7 @@ def add_chat(state, user, text):
         state["since_spoke"] += 1
 
 def score_message(state, key, text, directed):
-    """Adjust disobedience for a chat line. directed=True if it's definitely aimed at Opie."""
+    """Adjust attitude for a chat line. directed=True if it's definitely aimed at Opie."""
     if directed or AT_OPIE.search(text):
         if SEVERE.search(text):
             bump(state, key, SEVERE_POINTS)
@@ -387,7 +398,8 @@ def cmd_log(user, text):
         add_chat(state, user, text)
         if is_command:
             return None
-        if OPIE_NAMES.search(text) or (key in NICKNAME_USERS and NICKNAMES.search(text)):
+        if (OPIE_NAMES.search(text) or (key in NICKNAME_USERS and NICKNAMES.search(text))
+                or (EXPLOIT.search(text) and ABOUT_OPIE.search(text))):
             return "followup"
         if state["chime_on"] and wants_to_chime(state):
             state["spoke_at"] = time.time()  # claim the slot so overlapping events don't double-chime
@@ -547,7 +559,7 @@ def cmd_mood(user):
     with StateLock():
         state = load_state()
         u = get_user(state, key)
-    write(f"Opie's disobedience toward @{user}: {int(u['dis'])}/100 ({level(u['dis'])})")
+    write(f"Opie's attitude toward @{user}: {int(u['dis'])}/100 ({level(u['dis'])})")
 
 def cmd_ask(user, question):
     if not question:
