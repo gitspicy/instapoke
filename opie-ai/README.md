@@ -1,4 +1,4 @@
-# Opie AI (v3.2)
+# Opie AI (v3.3)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -108,7 +108,7 @@ python ask.py --status "" ""
 - **Long replies:** split into two messages only when they don't fit in one (195 chars). `[stage directions]` and `*actions*` are stripped first.
 - **Chime-ins:** when chat is busy (8+ lines in 2 min) and he's been quiet 5+ min and 15+ lines, each new line has a 15% chance he jumps in.
 - **Gambling quips:** a bot post like "Dang @bob, you lost 150000!" at or above 100,000 gets a roast.
-- **Sports fan:** roots for every New York team (except the Yankees, because Antman loves them) plus all the Philly teams for his wife's family, "the Philly Crew". One of his teams is always winning.
+- **Sports fan:** roots for every New York team (except the Yankees, because Antman loves them) plus all the Philly teams for his wife's family, "the Philly Crew", plus the Boston teams from when he lived there. One of his teams is always winning.
 - **Daily moods:** bitter, manic, wine-drunk or nostalgic. He switches to a different one every 5–10 hours.
 - **Edge (0–3):** how hard he pushes whatever mood he's in. 0 clean, 1 sassy, 2 edgy (default), 3 maximum.
 - **Hard limits at every edge:** no slurs, no attacks on race, ethnicity, religion, gender, sexuality or disability, nothing sexually explicit, no threats or encouraging violence or self-harm, no personal info.
@@ -175,7 +175,7 @@ python ask.py --status "" ""
 | `EDGE_DEFAULT` | `2` | Edge when there's no saved setting |
 | `EDGE_LEVELS` | 0–3 descriptions | What each edge level means to the model |
 | `HARD_LIMITS` | see above | Rules that apply at every edge level |
-| `SPORTS` | NY + Philly teams | His bandwagon of favourite teams. Edit to add or remove teams |
+| `SPORTS` | NY + Philly + Boston teams | His bandwagon of favourite teams. Edit to add or remove teams |
 
 ### Roasts and gambling
 | Variable | Default | What it does |

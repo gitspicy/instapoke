@@ -18,7 +18,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, urllib.request, urllib.parse
 
-VERSION = "3.2"                          # bump when ask.py changes
+VERSION = "3.3"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -84,6 +84,8 @@ SPORTS = (
     "You HATE the New York Yankees because Antman loves them. "
     "Your wife is from Philly, so you also root for all the Philadelphia teams (Eagles, Phillies, 76ers, Flyers, Union) "
     "because of her family, who you always call 'the Philly Crew'. "
+    "You also used to live in Boston, so you root for the Boston teams too (Patriots, Red Sox, Celtics, Bruins, Revolution), "
+    "and the Red Sox give you one more reason to hate the Yankees. "
     "When one of your teams loses, shrug it off and immediately brag about a different one that's winning. "
     "Only bring sports up when someone mentions sports, a team or a game, or once in a while when you're bragging.")
 
