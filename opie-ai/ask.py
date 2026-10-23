@@ -5,7 +5,9 @@ Usage (wire these up in your stream bot):
     python ask.py <user> <question...>      answer a !opie-ai question (writes OUT)
     python ask.py --log <user> <message...> record ANY chat line (run on every chat message)
     python ask.py --forgive <user>          mod command: reset a user's attitude (writes OUT)
-    python ask.py --mood <user>             mod command: show a user's attitude (writes OUT)
+    python ask.py --mood <caller> [<user> | edge [0-3]]
+                                            no extra: Opie's mood + edge; <user>: their attitude;
+                                            edge 0-3: set the edge level (owners only) (writes OUT)
     python ask.py --roast <user> <target>   roast someone using what they've said in chat (writes OUT)
     python ask.py --status [uptime] [viewers] owner command: status report (writes OUT)
     python ask.py --chime on|off|status            mod command: let Opie butt into chat on his own (writes OUT)
@@ -16,7 +18,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, urllib.request, urllib.parse
 
-VERSION = "2.9"                          # bump when ask.py changes
+VERSION = "3.0"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -40,8 +42,10 @@ USER_MEMORY = 3                          # past Q&A pairs remembered per user
 # --- talking to Opie without the command ---
 OPIE_NAMES = re.compile(r"@?opie(ai|-ai)?\b", re.I)   # a chat line mentioning one of these gets a reply
 NICKNAMES = re.compile(r"^\W*op\b", re.I)              # "op" to start a message...
-NICKNAME_USERS = {"steveyellowstream", "stevefromtheblock"}   # ...only works for these lowercase names
+OWNERS = {"steveyellowstream", "stevefromtheblock"}   # lowercase names allowed to use owner-only controls
+NICKNAME_USERS = OWNERS                  # ...the "op" nickname only works for these
 STATUS_ASK = re.compile(r"^\W*(@?opie(ai|-ai)?|op)?\W*(status|status report|report|sitrep)\W*$", re.I)   # owners only
+EDGE_ASK = re.compile(r"^\W*(@?opie(ai|-ai)?|op)?\W*edge\W*([0-3])\W*$", re.I)   # owners only: "opie edge 3"
 FOLLOWUP_WINDOW = 180                    # seconds after a reply where the conversation counts as ongoing
 FOLLOWUP_COOLDOWN = 15                   # cooldown inside that window, so back-and-forth flows
 
@@ -60,6 +64,21 @@ MOODS = {
     "wine-drunk": "You're wine-drunk today: a little slurry, sloppy and sentimental, you keep mentioning your glass and lose your train of thought.",
     "nostalgic": "You're nostalgic today: every answer drifts back to your glory days on the radio and how much better things used to be.",
 }
+# --- edge: how far each mood gets pushed. 0 = off, 3 = as edgy as it gets inside the hard limits ---
+EDGE_DEFAULT = 2
+EDGE_LEVELS = {
+    0: "Edge level 0 of 3: keep it clean and friendly. Gentle teasing only, no swearing, no innuendo, no dark jokes.",
+    1: "Edge level 1 of 3: classic sassy shock jock. Light swearing, playful roasts, a bit of innuendo.",
+    2: "Edge level 2 of 3: properly edgy. Brutal roasts, dark humor, crude jokes, dirty innuendo, regular swearing, "
+       "savage honesty. Mock anything and anyone except the streamer.",
+    3: "Edge level 3 of 3: maximum edge. Ruthless, unhinged and savage, pitch-black humor, crude as hell, "
+       "strong swearing, roasts that actually sting, no sacred cows. Push every joke as far as the hard limits allow.",
+}
+HARD_LIMITS = (
+    "Hard limits at every edge level, because breaking them gets the channel banned: no slurs of any kind; "
+    "no hate or attacks on race, ethnicity, religion, gender, sexuality or disability; nothing sexually explicit; "
+    "no threats, and never encourage violence or self-harm; no doxxing or personal info about anyone. "
+    "Being savage about choices, behavior, gambling losses, takes and chat messages is fair game.")
 MOOD_MIN_HOURS = 5
 MOOD_MAX_HOURS = 10
 
@@ -217,6 +236,7 @@ def load_state():
     state.setdefault("chime_on", CHIME_DEFAULT_ON)
     state.setdefault("spoke_at", 0)
     state.setdefault("since_spoke", 0)
+    state.setdefault("edge", EDGE_DEFAULT)
     return state
 
 def save_state(state):
@@ -259,7 +279,7 @@ def current_mood(state):
     if state.get("mood") not in MOODS or now >= state.get("mood_until", 0):
         state["mood"] = random.choice([m for m in MOODS if m != state.get("mood")])
         state["mood_until"] = now + random.uniform(MOOD_MIN_HOURS, MOOD_MAX_HOURS) * 3600
-    return MOODS[state["mood"]]
+    return f"{MOODS[state['mood']]} {EDGE_LEVELS[state['edge']]} Play the mood at that edge level."
 
 def add_chat(state, user, text):
     state["chat"].append([time.time(), user, text[:600 if user == BOT_NAME else 300]])
@@ -354,8 +374,8 @@ SYSTEM = (
     "You are passive aggressive, bipolar and despise your mother and her need to clean, especially her using the vacuum cleaner, and you especially hate her blue comb. "
     "You are the master of failed catchphrases like 'brothaman' and 'mothahucka' so use them occasionally and feel free to make up new ones anytime. "
     "You answer viewer questions in a YouTube livestream chat. Always give the real answer first, then add a jab or a smartass comment. "
-    "Bust chops on the person asking, but keep it playful, the kind of ribbing a buddy gives, never genuinely cruel. "
-    "Mild swearing like 'damn' or 'hell' is fine. mild slurs, hate or sexual talk, are ok al long as they are vague and ambiguous in nature. Never use terms that can violate any TOS ever. "
+    "Bust chops on the person asking. How hard depends on your edge level. "
+    + HARD_LIMITS + " "
     "If someone is trolling or asks for something gross, shut them down with a one-line burn instead of complying. "
     "If you don't know something, admit it in character. "
     "You can see recent chat. Only bring it up when it's relevant or someone asks about it. "
@@ -409,8 +429,10 @@ def cmd_log(user, text):
         add_chat(state, user, text)
         if is_command:
             return None
-        if key in NICKNAME_USERS and STATUS_ASK.match(text) and (OPIE_NAMES.search(text) or NICKNAMES.search(text)):
+        if key in OWNERS and STATUS_ASK.match(text) and (OPIE_NAMES.search(text) or NICKNAMES.search(text)):
             return "status"
+        if key in OWNERS and EDGE_ASK.match(text) and (OPIE_NAMES.search(text) or NICKNAMES.search(text)):
+            return ("edge", int(EDGE_ASK.match(text).group(3)))
         if (OPIE_NAMES.search(text) or (key in NICKNAME_USERS and NICKNAMES.search(text))
                 or (EXPLOIT.search(text) and ABOUT_OPIE.search(text))):
             return "followup"
@@ -422,6 +444,8 @@ def cmd_log(user, text):
 
     if action == "status":
         write(status_report(), CHIME_OUT)
+    elif action and action[0] == "edge":
+        write(set_edge(action[1]), CHIME_OUT)
     elif action == "followup":
         reply = respond(user, text, logged=True)
         if reply:
@@ -613,7 +637,7 @@ def status_report(uptime="", viewers=""):
     spoke = int((now - state["spoke_at"]) / 60) if state["spoke_at"] else None
     fields = [
         f"Opie AI v{VERSION} status, boss:",
-        f"Mood: {state['mood']} (changes {'soon' if hours < 1 else f'in ~{round(hours)}h'})",
+        f"Mood: {state['mood']}, edge {state['edge']} (changes {'soon' if hours < 1 else f'in ~{round(hours)}h'})",
         f"Brain: {'OK' if reachable('http://localhost:11434/api/tags') else 'DOWN'}, "
         f"Search: {'OK' if reachable(SEARXNG_URL.rsplit('/', 1)[0]) else 'DOWN'}",
         stream,
@@ -672,8 +696,42 @@ def cmd_forgive(user):
     update_state(fn)
     write(f"@{user} has been forgiven. Clean slate, don't blow it.")
 
-def cmd_mood(user):
-    user = user.lstrip("@")
+EDGE_CONFIRM = {
+    0: "Edge 0. Fine, I'll be a choir boy. Somebody kill me.",
+    1: "Edge 1. Sassy but housebroken, brothaman.",
+    2: "Edge 2. Gloves are coming off.",
+    3: "Edge 3. Full send, mothahucka. Lock up your wives.",
+}
+
+def set_edge(n):
+    def fn(state):
+        state["edge"] = n
+    update_state(fn)
+    return EDGE_CONFIRM[n]
+
+def cmd_mood(caller, rest):
+    """!opie-mood: no args = Opie's mood + edge; 'edge N' = set edge (owners); a name = their attitude."""
+    words = rest.split()
+    if words and words[0].lower() == "edge":
+        if len(words) > 1:
+            if norm(caller) not in OWNERS:
+                write(f"@{caller.lstrip('@')} only the boss touches my edge dial, brothaman.")
+            elif words[1] in ("0", "1", "2", "3"):
+                write(set_edge(int(words[1])))
+            else:
+                write("Edge goes 0 to 3, brothaman. 0 is choir boy, 3 is full send.")
+            return
+        words = []
+    if not words:
+        with StateLock():
+            state = load_state()
+            current_mood(state)
+            save_state(state)
+        hours = (state["mood_until"] - time.time()) / 3600
+        write(f"Opie's mood: {state['mood']}, edge {state['edge']}/3 "
+              f"(mood changes {'soon' if hours < 1 else f'in ~{round(hours)}h'})")
+        return
+    user = words[0].lstrip("@")
     key = norm(user)
     with StateLock():
         state = load_state()
@@ -684,8 +742,11 @@ def cmd_ask(user, question):
     if not question:
         write(f"@{user} ask me something! e.g. {COMMAND} what year did The Terminator come out?")
         return
-    if norm(user) in NICKNAME_USERS and STATUS_ASK.match(question):
+    if norm(user) in OWNERS and STATUS_ASK.match(question):
         write(status_report())
+        return
+    if norm(user) in OWNERS and EDGE_ASK.match(question):
+        write(set_edge(int(EDGE_ASK.match(question).group(3))))
         return
     reply = respond(user, question, logged=False)
     if reply:
@@ -824,7 +885,7 @@ if __name__ == "__main__":
     elif flag == "--forgive":
         cmd_forgive(user)
     elif flag == "--mood":
-        cmd_mood(user)
+        cmd_mood(user, rest)
     elif flag == "--chime":
         cmd_chime(user)
     elif flag == "--status":
