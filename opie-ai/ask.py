@@ -14,11 +14,11 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "1.6"                          # bump when ask.py changes
+VERSION = "1.7"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
-PART2_OUT = os.environ.get("OPIE_PART2_OUT", r"D:\DOODA\streamscripts\ai_reply2.txt")   # 2nd message of a long reply, blank if none
+PART2_OUT = os.environ.get("OPIE_PART2_OUT", r"D:\DOODA\streamscripts\ai_reply2.txt")   # 2nd message of a long reply, "none" if there isn't one
 MAX_CHARS = 195                          # YouTube chat limit is 200
 BOT_NAME = "OpieAI"                      # how Opie's own replies show up in the chat log
 BOT_ACCOUNTS = {"opieai"}                # lowercase chat names Opie posts as; their messages are never answered
@@ -115,7 +115,7 @@ def write(text, path=OUT):
     with open(path, "w", encoding="utf-8") as f:
         f.write(first)
     with open(PART2_OUT, "w", encoding="utf-8") as f:
-        f.write(second)
+        f.write(second or "none")        # never empty: Mix It Up leaves an empty file's identifier unfilled
     text = first
     # also print it, so bots like Mix It Up can post the External Program output directly
     if sys.stdout:
