@@ -18,7 +18,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, urllib.request, urllib.parse
 
-VERSION = "3.0"                          # bump when ask.py changes
+VERSION = "3.1"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -45,6 +45,7 @@ NICKNAMES = re.compile(r"^\W*op\b", re.I)              # "op" to start a message
 OWNERS = {"steveyellowstream", "stevefromtheblock"}   # lowercase names allowed to use owner-only controls
 NICKNAME_USERS = OWNERS                  # ...the "op" nickname only works for these
 STATUS_ASK = re.compile(r"^\W*(@?opie(ai|-ai)?|op)?\W*(status|status report|report|sitrep)\W*$", re.I)   # owners only
+STREAM_ASK = re.compile(r"^\W*(@?opie(ai|-ai)?|op)?\W*(cpu|stream|obs|health|stats)\W*$", re.I)   # owners only
 EDGE_ASK = re.compile(r"^\W*(@?opie(ai|-ai)?|op)?\W*edge\W*([0-3])\W*$", re.I)   # owners only: "opie edge 3"
 FOLLOWUP_WINDOW = 180                    # seconds after a reply where the conversation counts as ongoing
 FOLLOWUP_COOLDOWN = 15                   # cooldown inside that window, so back-and-forth flows
@@ -433,6 +434,8 @@ def cmd_log(user, text):
             return "status"
         if key in OWNERS and EDGE_ASK.match(text) and (OPIE_NAMES.search(text) or NICKNAMES.search(text)):
             return ("edge", int(EDGE_ASK.match(text).group(3)))
+        if key in OWNERS and STREAM_ASK.match(text) and (OPIE_NAMES.search(text) or NICKNAMES.search(text)):
+            return "stream"
         if (OPIE_NAMES.search(text) or (key in NICKNAME_USERS and NICKNAMES.search(text))
                 or (EXPLOIT.search(text) and ABOUT_OPIE.search(text))):
             return "followup"
@@ -444,6 +447,8 @@ def cmd_log(user, text):
 
     if action == "status":
         write(status_report(), CHIME_OUT)
+    elif action == "stream":
+        write(stream_report(), CHIME_OUT)
     elif action and action[0] == "edge":
         write(set_edge(action[1]), CHIME_OUT)
     elif action == "followup":
@@ -664,6 +669,11 @@ def status_report(uptime="", viewers=""):
                 msgs.append(f)
     return "\n".join(msgs)
 
+def stream_report():
+    """Owner-only quick check: just the OBS numbers, no grudge list."""
+    stream, uptime = obs_stats()
+    return f"{stream} | Uptime: {uptime}" if uptime else stream
+
 def cmd_status(uptime, viewers):
     write(status_report(uptime, viewers))
 
@@ -744,6 +754,9 @@ def cmd_ask(user, question):
         return
     if norm(user) in OWNERS and STATUS_ASK.match(question):
         write(status_report())
+        return
+    if norm(user) in OWNERS and STREAM_ASK.match(question):
+        write(stream_report())
         return
     if norm(user) in OWNERS and EDGE_ASK.match(question):
         write(set_edge(int(EDGE_ASK.match(question).group(3))))
