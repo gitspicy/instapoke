@@ -16,7 +16,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, re, json, time, random, urllib.request, urllib.parse
 
-VERSION = "2.6"                          # bump when ask.py changes
+VERSION = "2.7"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -565,7 +565,6 @@ def status_report(uptime="", viewers=""):
                           if k not in EXEMPT and k not in BOT_ACCOUNTS), reverse=True)
         grudges = [f"{k} {int(d)} ({level(d)})" for d, k in grudges if level(d) != "CHILL"][:4]
         recent = [n for ts, n, _ in state["chat"] if now - ts <= 600 and n != BOT_NAME and norm(n) not in BOT_ACCOUNTS]
-        exploits = sum(u.get("exploits", 0) for u in state["users"].values())
 
     hours = (state["mood_until"] - now) / 3600
     top = max(set(recent), key=recent.count) if recent else None
@@ -582,7 +581,6 @@ def status_report(uptime="", viewers=""):
     fields += [
         f"Chat: {len(recent)} msgs in 10 min" + (f", loudest {top}" if top else ""),
         f"Chime-ins: {'ON' if state['chime_on'] else 'OFF'}" + (f", last spoke {spoke}m ago" if spoke is not None else ""),
-        f"Hack attempts caught: {exploits}",
         f"Brain ({MODEL}): {'OK' if reachable('http://localhost:11434/api/tags') else 'DOWN'}",
         f"Search: {'OK' if reachable(SEARXNG_URL.rsplit('/', 1)[0]) else 'DOWN'}",
     ]
