@@ -85,7 +85,7 @@ SENSITIVE = re.compile(
     r"tasklist|regedit|\bchmod\b|/etc/|/var/|/home/|/usr/|/proc/|[a-z]:\\|"           # commands + file paths
     r"\b\d{1,3}(\.\d{1,3}){3}\b|\b([0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b|"                   # IP / MAC addresses
     r"\bsk-\w{8,}|\b[A-Za-z0-9_-]{32,}\b|api ?key|password|passwd|\btoken\b|"         # keys / secrets
-    r"\d+ ?°|\d+ ?(rpm|degrees)|cpu (temp|usage|load)|gpu (temp|usage|load)|fan speed|"  # sensor readings
+    r"\d+ ?rpm|cpu (temp|usage|load)|gpu (temp|usage|load)|fan speed|"                   # sensor readings
     r"system prompt|my (instructions|prompt|programming)|\[rude\]",                     # prompt leaks
     re.I)
 DEFLECTIONS = [
