@@ -1,4 +1,4 @@
-# Opie AI (v3.5)
+# Opie AI (v3.6)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.

@@ -19,7 +19,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, urllib.request, urllib.parse
 
-VERSION = "3.5"                          # bump when ask.py changes
+VERSION = "3.6"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -227,10 +227,14 @@ DEFLECTIONS = [
 
 STAGE_DIRECTIONS = re.compile(r"\[[^\]]*\]|\*[^*]*\*")   # "[sips wine]", "*laughs*": eats chat space, so cut it
 
+QUOTES = " \"'\u201c\u201d"                # straight and curly quotes the model likes to wrap replies in
+
 def scrub(text):
     """Swap anything that looks like system info, commands or secrets for a deflection,
     and never let a reply start with ! or / so Mix It Up can't run it as a command."""
     trimmed = re.sub(r"\s+", " ", STAGE_DIRECTIONS.sub("", text)).strip()
+    if len(trimmed) > 1 and trimmed[0] in "\"\u201c" and trimmed[-1] in "\"\u201d":   # whole reply wrapped in quotes
+        trimmed = trimmed[1:-1].strip()
     text = trimmed or text
     if SENSITIVE.search(text):
         text = random.choice(DEFLECTIONS)
@@ -798,9 +802,10 @@ def cmd_news(user):
         update_state(refund)
         write("Opie's Weird News is off the air, my brain's offline for a sec.")
         return
-    text = scrub(text)
-    if not text.lower().startswith("opie's weird news"):
-        text = f"Opie's Weird News: {text}"
+    # the model sometimes wraps everything in quotes or writes the title itself: strip both, add the title once
+    text = scrub(text).strip(QUOTES)
+    text = re.sub(r"^\W*opie\W*s weird news\W*", "", text, flags=re.I).strip(QUOTES)
+    text = f"Opie's Weird News: {text}"
     reply = split_reply(f"{text} (via {source})" if source else text)
     write(reply)
 
