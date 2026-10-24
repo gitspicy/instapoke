@@ -19,7 +19,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, urllib.request, urllib.parse
 
-VERSION = "3.6"                          # bump when ask.py changes
+VERSION = "3.7"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -784,7 +784,6 @@ def cmd_news(user):
               else "Opie's Weird News: slow week, nothing weird enough for me. The world's gone boring, brothaman.")
         return
     title, snippet, link = story
-    source = urllib.parse.urlparse(link).netloc.removeprefix("www.")
 
     system = (f"{SYSTEM} {ctx['mood']} You're doing your radio segment 'Opie's Weird News'. "
               "Start with 'Opie's Weird News:' then tell the story in your own words in one or two sentences, "
@@ -806,7 +805,7 @@ def cmd_news(user):
     text = scrub(text).strip(QUOTES)
     text = re.sub(r"^\W*opie\W*s weird news\W*", "", text, flags=re.I).strip(QUOTES)
     text = f"Opie's Weird News: {text}"
-    reply = split_reply(f"{text} (via {source})" if source else text)
+    reply = split_reply(text)
     write(reply)
 
     def finish(state):
