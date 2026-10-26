@@ -1,4 +1,4 @@
-# Opie AI (v4.1)
+# Opie AI (v4.2)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -81,6 +81,10 @@ Steps 3–4 are only needed where replies can run long (`!ai`, `!roast`, the cha
 | `!opie-status` | `"D:\DOODA\streamscripts\ask.py" --status "" "$streamviewercount"`. Check Mix It Up's identifier list for the real viewer-count name |
 
 Use `python`, not `pythonw` (it has no output for Mix It Up to read).
+
+### Timer: Opie plugs his commands
+External Program `"D:\DOODA\streamscripts\ask.py" --promo beg` (or `roast`, `news`, or `random` to rotate), then Chat `$externalprogramresult`.
+Each run is a freshly written ad in his current mood that always includes the command.
 
 ### Timer: disclaimer every 24 hours (1,440 minutes)
 > ⚠️ Reminder: OPIE = Online Programmed Interactive Entertainment. I'm a parody AI, not a real person or affiliated with one. Everything I say is made up for laughs. Don't take it seriously, brothaman.

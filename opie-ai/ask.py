@@ -11,6 +11,7 @@ Usage (wire these up in your stream bot):
     python ask.py --roast <user> <target>   roast someone using what they've said in chat (writes OUT)
     python ask.py --status [uptime] [viewers] owner command: status report (writes OUT)
     python ask.py --beg <user> <balance> <subscriber>   !beg: Opie may gift currency (writes OUT + BEG_OUT)
+    python ask.py --promo [beg|roast|news|random]   Opie plugs one of his commands, for a Mix It Up timer (writes OUT)
     python ask.py --news <user>             Opie's Weird News: a real bizarre story from the past week (writes OUT)
     python ask.py --chime on|off|status            mod command: let Opie butt into chat on his own (writes OUT)
 
@@ -20,7 +21,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, datetime, urllib.request, urllib.parse
 
-VERSION = "4.1"                          # bump when ask.py changes
+VERSION = "4.2"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -267,7 +268,7 @@ def scrub(text):
     text = trimmed or text
     if BANNED_WORDS:                     # cut banned words, then tidy the gap they leave
         text = re.sub(r"\s{2,}", " ", BANNED.sub("", text))
-        text = re.sub(r"\s+([,!.?])", r"\1", text).strip(" ,") or "brothaman."
+        text = re.sub(r"\s+([,!.?])(?=\s|$)", r"\1", text).strip(" ,") or "brothaman."   # "word ," -> "word," but keep " !beg"
     if SENSITIVE.search(text):
         text = random.choice(DEFLECTIONS)
     return text.lstrip("!/ ")
@@ -966,6 +967,46 @@ def cmd_beg(user, raw_balance="", raw_sub=""):
     write(reply)
     update_state(lambda state: add_chat(state, BOT_NAME, reply.replace("\n", " ")))
 
+PROMOS = {                               # what each ad is about; the command must appear in the ad
+    "beg": ("!beg", f"Viewers can type !beg to beg you for free {CURRENCY}, {BEGS_PER_PERIOD} tries every {BEG_PERIOD_HOURS} hours. "
+                    "Broke people and regulars get the most. You want them to spend it on the games, not hoard it."),
+    "roast": ("!roast", "Viewers can type !roast @someone and you'll roast that person using what they've said in chat."),
+    "news": ("!weirdnews", "Viewers can type !weirdnews and you'll read them a real bizarre news story from this week."),
+}
+PROMO_FALLBACKS = {
+    "beg": f"Running low on {CURRENCY}? Type !beg and I might take pity on you, brothaman.",
+    "roast": "Got a buddy who needs humbling? Type !roast @them and I'll handle it, brothaman.",
+    "news": "The world's gone nuts and I've got the receipts. Type !weirdnews, brothaman.",
+}
+
+def cmd_promo(topic):
+    topic = topic.lower().strip()
+    if topic not in PROMOS:
+        topic = random.choice(list(PROMOS))
+    command, pitch = PROMOS[topic]
+    with StateLock():
+        state = load_state()
+        mood = current_mood(state)
+        save_state(state)
+    system = (f"{SYSTEM} {mood} You're plugging one of your features to chat, like a radio host reading an ad in his own style. "
+              f"One or two short sentences, under 170 characters, and you MUST include the exact command {command}. "
+              "Don't @ anyone, don't greet anyone.")
+    try:
+        text = re.sub(r"\s+", " ", ollama([
+            {"role": "system", "content": system},
+            {"role": "user", "content": pitch},
+        ])).strip()
+        text = scrub(RUDE_LEAD.sub("", re.sub(re.escape(RUDE_TAG), "", text, flags=re.I)).strip())
+    except Exception:
+        text = ""
+    if not text:
+        text = PROMO_FALLBACKS[topic]
+    elif command not in text.lower():
+        text += f" Type {command}."              # the whole point of the ad is the command
+    reply = split_reply(text)
+    write(reply)
+    update_state(lambda state: add_chat(state, BOT_NAME, reply.replace("\n", " ")))
+
 def cmd_chime(setting):
     setting = setting.lower()
     if setting in ("on", "1", "yes", "true", "off", "0", "no", "false"):
@@ -1194,6 +1235,8 @@ if __name__ == "__main__":
         cmd_chime(user)
     elif flag == "--status":
         cmd_status(*(args + ["", ""])[:2])
+    elif flag == "--promo":
+        cmd_promo(user if args else "")
     elif flag == "--beg":
         cmd_beg(user, *(args[1:] + ["", ""])[:2])
     elif flag == "--news":
