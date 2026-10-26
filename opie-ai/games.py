@@ -20,8 +20,9 @@ GAME_PAY = os.path.join(ask.HERE, "game_pay.txt")         # N-persons to give th
 HILO_MIN_BET = 100
 HILO_MAX_BET = 50000                     # 50k doubled 5 times = 1.6M max payout
 HILO_ROUNDS = 5                          # guesses per game (a push uses one up)
-HILO_WIN_MULT = 2                        # each win multiplies the pot by this. 2 = 50k becomes 1.6M after 5 wins.
-                                         # Smart players average about 6.7x their bet at 2, 1.7x at 1.5, 1.2x at 1.4
+HILO_WIN_MULT = 1.3                      # each win multiplies the pot by this. 1.3 = 50k becomes ~185k after 5 wins.
+                                         # Smart players average back 0.86x their bet at 1.3 (house edge), 1.2x at 1.4,
+                                         # 1.7x at 1.5, 6.7x at 2
 HILO_TIMEOUT = 120                       # seconds a player can stall before someone waiting can bump them (they forfeit)
 HILO_QUEUE_MAX = 10
 HILO_NO_PLAY = ("HOSTILE", "MUTINY")     # attitude levels Opie won't play with: he keeps the bet
@@ -48,6 +49,12 @@ def new_deck():
     deck = [[r, s] for r in range(13) for s in range(4)]
     random.shuffle(deck)
     return deck
+
+def rules():
+    best = int(HILO_MAX_BET * HILO_WIN_MULT ** HILO_ROUNDS)
+    return (f"HIGHER OR LOWER: call the next card, ace high. {HILO_ROUNDS} guesses. "
+            f"Right = pot x{HILO_WIN_MULT:g}, same card = push (uses a guess), wrong = you lose it all. "
+            f"Survive all {HILO_ROUNDS} to cash out (max {best:,}).")
 
 def start_game(state, user, bet):
     deck = new_deck()
@@ -137,16 +144,17 @@ def cmd_hilo(user, raw_bet="", raw_balance=""):
                 queue.append({"user": user, "bet": bet})
                 return "charge", bumped + next_in_line(state).strip() + f" @{user} you're #{len(queue)} in line."
         if not game:
-            return "charge", bumped + start_game(state, user, bet)
+            return "charge", f"{bumped}{rules()}\n{start_game(state, user, bet)}"
         if len(queue) >= HILO_QUEUE_MAX:
             return "busy", f"@{user} the line's full, brothaman. Try again in a bit."
         queue.append({"user": user, "bet": bet})
-        return "charge", (f"@{user} {game['player']}'s at the table. You're #{len(queue)} in line with {bet:,} {ask.CURRENCY}. "
-                          "I'll deal you in when they bust. (!leave to back out)")
+        return "charge", (f"{rules()}\n@{user} {game['player']}'s at the table. You're #{len(queue)} in line with "
+                          f"{bet:,} {ask.CURRENCY}. I'll deal you in when they bust. (!leave to back out)")
     outcome, text = ask.update_state(join)
     if outcome in ("charge", "grudge"):
         money(charge=bet)
-    ask.write(ask.split_reply(text))
+    first, _, second = text.partition("\n")   # rules + game come pre-split into two messages
+    ask.write(f"{ask.fit(first)}\n{ask.fit(second)}" if second else ask.split_reply(text))
 
 
 def cmd_guess(user, guess):

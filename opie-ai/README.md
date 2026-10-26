@@ -67,8 +67,8 @@ The first should print nothing. The second should print Opie's mood and edge.
 
 ### Higher or Lower
 One player at a time; everyone else queues. Opie flips a card, you call the next one higher or lower (ace high).
-5 guesses per game: a win doubles the pot, a push (same rank) uses a guess and changes nothing, a wrong guess loses it all.
-Survive all 5 and you take the pot. Bet 100 to 50,000, so the most you can win is 1.6M.
+5 guesses per game: a win multiplies the pot by 1.3, a push (same rank) uses a guess and changes nothing, a wrong guess loses it all.
+Survive all 5 and you take the pot. Bet 100 to 50,000, so the most you can win is about 185k. Opie reads the rules before every game (and to anyone joining the line). At 1.3x the house keeps a small edge: smart players get back about 86% of what they bet on average.
 
 | Type in chat | What happens |
 |---|---|
