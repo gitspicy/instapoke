@@ -1,4 +1,4 @@
-# Opie AI (v3.7)
+# Opie AI (v3.8)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -213,6 +213,11 @@ python ask.py --status "" ""
 | `LEVELS` | 75 / 50 / 25 / 0 | Score thresholds for MUTINY / HOSTILE / ANNOYED / CHILL |
 | `HOSTILE_REFUSE_CHANCE` | `0.5` | Refusal odds at HOSTILE |
 | `HOSTILE_COOLDOWN_MULT` | `2` | Cooldown multiplier at HOSTILE and MUTINY |
+
+### Word bank
+| Variable | Default | What it does |
+|---|---|---|
+| `BANNED_WORDS` | `["boo"]` | Words Opie must never say. He's told not to, and any that slip through are cut from the reply. Lowercase, comma-separated, e.g. `["boo", "bestie"]` |
 
 ### Word lists (regex)
 | Variable | What it matches |
