@@ -20,7 +20,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, datetime, urllib.request, urllib.parse
 
-VERSION = "4.0"                          # bump when ask.py changes
+VERSION = "4.1"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -147,7 +147,8 @@ CURRENCY = "N-persons"
 
 # --- !beg: Opie hands out currency to people who need it and play the games ---
 BEG_OUT = os.environ.get("OPIE_BEG_OUT", r"D:\DOODA\streamscripts\beg_award.txt")   # amount to give, 0 if nothing
-BEGS_PER_DAY = 3                         # chances per day (resets at midnight); only one can pay out
+BEG_PERIOD_HOURS = 6                     # a beg round lasts this long, starting from your first beg
+BEGS_PER_PERIOD = 3                      # chances per round; only one can pay out
 BEG_TIERS = [                            # (balance up to, smallest gift, biggest gift): poorer = bigger gifts
     (1000, 10000, 50000),                # tier 1: broke
     (10000, 4000, 20000),                # tier 2
@@ -878,23 +879,26 @@ def cmd_beg(user, raw_balance="", raw_sub=""):
     def decide(state):
         u = get_user(state, key)
         beg = u.get("beg", {})
-        if beg.get("day") != today:
-            beg = {"day": today, "count": 0, "awarded": 0}
+        now = time.time()
+        if now - beg.get("start", 0) >= BEG_PERIOD_HOURS * 3600:   # previous round is over: start a fresh one
+            beg = {"start": now, "count": 0, "awarded": 0}
         days = [d for d in u.get("beg_days", []) if d in week]
         if today not in days:
             days.append(today)
         u["beg_days"] = days
         beg["count"] += 1
         u["beg"] = beg
-        ctx = {"count": beg["count"], "mood": current_mood(state), "habit": len(days) >= BEG_HABIT_DAYS,
+        left = beg["start"] + BEG_PERIOD_HOURS * 3600 - now
+        ctx = {"count": beg["count"], "mood": current_mood(state),
+               "reset": f"{int(left // 3600)}h {int(left % 3600 // 60)}m" if left >= 3600 else f"{int(left // 60) + 1}m", "habit": len(days) >= BEG_HABIT_DAYS,
                "attitude": "CHILL" if key in EXEMPT else level(u["dis"])}
         mood = state["mood"]
 
-        if beg["count"] > BEGS_PER_DAY:
+        if beg["count"] > BEGS_PER_PERIOD:
             bump(state, key, IMPATIENT_POINTS)
             return {**ctx, "outcome": "over"}
         if beg["awarded"]:
-            return {**ctx, "outcome": "deny", "reason": f"{user} already got {beg['awarded']:,} {CURRENCY} from you today and is back for more."}
+            return {**ctx, "outcome": "deny", "reason": f"{user} already got {beg['awarded']:,} {CURRENCY} from you this round and is back for more."}
         if ctx["attitude"] != "CHILL":
             return {**ctx, "outcome": "deny", "reason": f"{user} has been rude to you lately (your attitude toward them is {ctx['attitude']})."}
         tier, lo, hi = beg_tier(balance)
@@ -911,7 +915,7 @@ def cmd_beg(user, raw_balance="", raw_sub=""):
             why = (f"You're in a foul {mood} mood and don't feel generous." if odds_mult < 1 else
                    f"{user} never chats or plays the games, they just show up to beg." if not engaged else
                    f"{user} begs every single day." if ctx["habit"] else "You just don't feel like it right now.")
-            return {**ctx, "outcome": "deny", "reason": why, "last": beg["count"] == BEGS_PER_DAY}
+            return {**ctx, "outcome": "deny", "reason": why, "last": beg["count"] == BEGS_PER_PERIOD}
         amount = random.uniform(lo, hi) * gift_mult * (BEG_SUB_MULT if sub else 1)
         amount = min(amount, hi * max(gift_mult, 1))          # subs and good moods top out at the tier max (+10% in a great mood)
         amount = max(50, int(round(amount / 50) * 50))         # tidy numbers
@@ -920,13 +924,15 @@ def cmd_beg(user, raw_balance="", raw_sub=""):
     ctx = update_state(decide)
 
     if ctx["outcome"] == "over":
-        write(f"@{user} that's {ctx['count']} begs today, you only get {BEGS_PER_DAY}. Have some dignity, brothaman.")
+        write(f"@{user} that's {ctx['count']} begs, you only get {BEGS_PER_PERIOD} every {BEG_PERIOD_HOURS} hours. "
+              f"Come back in {ctx['reset']} and have some dignity, brothaman.")
         return
 
     # the script states the numbers itself, in plain words, so the model can't garble them ("2000K")
     lead = (f"you get {ctx['amount']:,} {CURRENCY}!" if ctx["outcome"] == "award" else
             f"you've got {balance:,} {CURRENCY} already." if ctx.get("rich") else "")
-    facts = [f"{user} is begging you for free {CURRENCY}. This is beg {min(ctx['count'], BEGS_PER_DAY)} of {BEGS_PER_DAY} today."
+    facts = [f"{user} is begging you for free {CURRENCY}. This is beg {min(ctx['count'], BEGS_PER_PERIOD)} of {BEGS_PER_PERIOD} "
+             f"they get every {BEG_PERIOD_HOURS} hours."
              + (" They're a subscriber." if sub else "")]
     if lead:
         facts.append(f"Your reply will be posted right after the words \"{lead}\". Don't mention any numbers or amounts yourself.")
@@ -937,7 +943,7 @@ def cmd_beg(user, raw_balance="", raw_sub=""):
     else:
         facts.append(f"You're saying NO. The reason: {ctx['reason']} Tell them why.")
         if ctx.get("last"):
-            facts.append("That was their last beg today and you said no every time: roast them hard for it.")
+            facts.append(f"That was their last beg for the next {ctx['reset']} and you said no every time: roast them hard for it.")
     system = (f"{SYSTEM} {ctx['mood']} You're the channel's sugar daddy for {CURRENCY}: generous, but you hate freeloaders and hoarders. "
               "One or two short sentences.")
     try:
@@ -953,7 +959,7 @@ def cmd_beg(user, raw_balance="", raw_sub=""):
         text = text or "Go lose it on the games, brothaman."
         write_award(ctx["amount"])
     elif not text:
-        text = "Go gamble it, brothaman." if ctx.get("rich") else f"No {CURRENCY} for you today, brothaman."
+        text = "Go gamble it, brothaman." if ctx.get("rich") else f"No {CURRENCY} for you right now, brothaman."
     if lead and text[:1].islower():
         text = text[0].upper() + text[1:]
     reply = split_reply(f"@{user} {lead} {text}".replace("  ", " "))

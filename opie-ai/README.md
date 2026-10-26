@@ -1,4 +1,4 @@
-# Opie AI (v3.9)
+# Opie AI (v4.1)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -33,7 +33,7 @@ The first should print nothing. The second should print Opie's mood and edge.
 | Any message containing **opie** | Opie replies, no command needed. 15s cooldown while you're mid-conversation; ignored quietly on cooldown |
 | `!roast @user` | Opie roasts them using what they've said in chat. 2 min per asker, 5 min per target |
 | `!weirdnews` | **Opie's Weird News**: a real bizarre story from the past week, radio-style. 2 min cooldown (owners skip it) |
-| `!beg` | Beg Opie for free N-persons. 3 begs a day, only 1 can pay out. Bigger gifts for broke viewers, subs and people who actually chat and gamble |
+| `!beg` | Beg Opie for free N-persons. 3 begs every 6 hours, only 1 can pay out. Bigger gifts for broke viewers, subs and people who actually chat and gamble |
 
 ### Owners only (`SteveYellowstream`, `stevefromtheblock`)
 
@@ -196,7 +196,8 @@ python ask.py --status "" ""
 | Variable | Default | What it does |
 |---|---|---|
 | `BEG_OUT` | `beg_award.txt` | Amount Mix It Up should pay out (0 = nothing) |
-| `BEGS_PER_DAY` | `3` | Begs per day (resets at midnight); only one can pay |
+| `BEG_PERIOD_HOURS` | `6` | How long a beg round lasts, starting from your first beg |
+| `BEGS_PER_PERIOD` | `3` | Begs per round; only one can pay |
 | `BEG_TIERS` | ≤1k: 10k–50k, ≤10k: 4k–20k, ≤50k: 1k–5k, ≤999,999: 50–1k | Balance → gift range. 1,000,000+ gets nothing |
 | `BEG_CHANCE` | `0.55` | Base odds a beg pays |
 | `BEG_SUB_BONUS` / `BEG_SUB_MULT` | `0.15` / `1.25` | Subscriber odds bonus / gift multiplier |
@@ -204,7 +205,7 @@ python ask.py --status "" ""
 | `BEG_HABIT_DAYS` / `BEG_HABIT_PENALTY` | `5` / `0.15` | Begging 5 of the last 7 days = serial beggar: worse odds, gets called out |
 | `BEG_MOOD` | bitter 0.5/0.25, wine-drunk 0.6/0.35, manic 1.2/1.10, nostalgic 1.1/1.05 | Mood → (odds, gift size). Above 1.0 can beat the tier max by that much |
 
-Rules: he only gives to people he likes (attitude CHILL). Each "no" comes with a reason. Three "no"s in a day earns a roast. A 4th beg gets "have some dignity" and a small attitude bump.
+Rules: he only gives to people he likes (attitude CHILL). Each "no" comes with a reason. Three "no"s in a round earns a roast. A 4th beg gets "have some dignity", how long until the next round, and a small attitude bump.
 
 ### Weird News
 | Variable | Default | What it does |
