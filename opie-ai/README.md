@@ -1,4 +1,4 @@
-# Opie AI (v4.2)
+# Opie AI (v4.3)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -12,6 +12,9 @@ Everything lives in `D:\DOODA\streamscripts\`:
 | `ai_reply.txt` | First message of the last command reply (also printed for `$externalprogramresult`) |
 | `ai_reply2.txt` | Second message of a long reply, or `none` |
 | `ai_chime.txt` | Backup copy of the last in-chat reply or chime-in. Nothing reads it |
+| `tip_amount.txt` | Amount the last `!tip` should take from the tipper, or 0 |
+| `opie_backups\` | Daily copies of `opie_state.json` (last 7 days) |
+| `opie_errors.log` | What went wrong, if anything. Send it to Claude when something breaks |
 | `obs_password.txt` | Your OBS WebSocket password, one line. Optional; only needed for stream stats |
 
 **Before going live after any update**, run both of these in a terminal:
@@ -34,6 +37,7 @@ The first should print nothing. The second should print Opie's mood and edge.
 | `!roast @user` | Opie roasts them using what they've said in chat. 2 min per asker, 5 min per target |
 | `!weirdnews` | **Opie's Weird News**: a real bizarre story from the past week, radio-style. 2 min cooldown (owners skip it) |
 | `!beg` | Beg Opie for free N-persons. 3 begs every 6 hours, only 1 can pay out. Bigger gifts for broke viewers, subs and people who actually chat and gamble |
+| `!tip <amount>` | Tip Opie N-persons (`500`, `5k`, `all`). Every 1,000 knocks 5 off your attitude; 25k+ is a **SUPERTIP** (all forgiven), 250k+ a **MEGATIP** |
 
 ### Owners only (`SteveYellowstream`, `stevefromtheblock`)
 
@@ -75,6 +79,7 @@ Steps 3–4 are only needed where replies can run long (`!ai`, `!roast`, the cha
 | `!roast` | `"D:\DOODA\streamscripts\ask.py" --roast "$username" "$arg1text"` |
 | `!weirdnews` | `"D:\DOODA\streamscripts\ask.py" --news "$username"` |
 | `!beg` | `"D:\DOODA\streamscripts\ask.py" --beg "$username" "<balance identifier>" "<subscriber identifier>"`. Then File: read `beg_award.txt` into `begaward`; Conditional `$begaward` greater than `0` → Currency action: add `$begaward` N-persons to the user |
+| `!tip` | `"D:\DOODA\streamscripts\ask.py" --tip "$username" "$arg1text" "<balance identifier>"`. Then File: read `tip_amount.txt` into `tipamount`; Conditional `$tipamount` greater than `0` → Currency action: **subtract** `$tipamount` N-persons from the user |
 | `!opie-mood` | `"D:\DOODA\streamscripts\ask.py" --mood "$username" $allargs` |
 | `!opie-forgive` | `"D:\DOODA\streamscripts\ask.py" --forgive "$arg1text"` |
 | `!opie-chime` | `"D:\DOODA\streamscripts\ask.py" --chime $arg1text` |
@@ -211,6 +216,20 @@ python ask.py --status "" ""
 
 Rules: he only gives to people he likes (attitude CHILL). Each "no" comes with a reason. Three "no"s in a round earns a roast. A 4th beg gets "have some dignity", how long until the next round, and a small attitude bump.
 
+### !tip
+| Variable | Default | What it does |
+|---|---|---|
+| `TIP_OUT` | `tip_amount.txt` | Amount Mix It Up should take from the tipper (0 = nothing) |
+| `TIP_MIN` | `100` | Smallest tip accepted |
+| `TIP_ATTITUDE_PER_1000` | `5` | Attitude points forgiven per 1,000 tipped |
+| `SUPERTIP` / `MEGATIP` | `25000` / `250000` | Tip sizes that wipe the slate clean and get the over-the-top treatment |
+
+### Backups and errors
+| Variable | Default | What it does |
+|---|---|---|
+| `BACKUP_DIR` / `BACKUP_DAYS` | `opie_backups` / `7` | A copy of `opie_state.json` is saved once a day; the last 7 are kept. If the main file is ever damaged, Opie restores the newest backup automatically (the broken one is kept as `opie_state.json.damaged`) |
+| `ERROR_LOG` / `ERROR_LOG_MAX` | `opie_errors.log` / 200 KB | Anything that goes wrong is written here instead of chat. Send it to Claude when something breaks |
+
 ### Weird News
 | Variable | Default | What it does |
 |---|---|---|
@@ -255,6 +274,9 @@ Rules: he only gives to people he likes (attitude CHILL). Each "no" comes with a
 | `SEARXNG_URL` | `http://localhost:8080/search` | Web search |
 | `SEARCH_RESULTS` / `SNIPPET_CHARS` | `4` / `400` | How much search text the model sees |
 | `OBS_HOST` / `OBS_PORT` | `localhost` / `4455` | OBS WebSocket (OBS → Tools → WebSocket Server Settings) |
-| `OBS_PASSWORD_FILE` | `obs_password.txt` | File holding the OBS password |
+| `OBS_PASSWORD_FILE` | `tip_amount.txt` | Amount the last `!tip` should take from the tipper, or 0 |
+| `opie_backups\` | Daily copies of `opie_state.json` (last 7 days) |
+| `opie_errors.log` | What went wrong, if anything. Send it to Claude when something breaks |
+| `obs_password.txt` | File holding the OBS password |
 
 OBS stats need a one-time `python -m pip install obsws-python`.

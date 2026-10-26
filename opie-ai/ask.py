@@ -12,6 +12,7 @@ Usage (wire these up in your stream bot):
     python ask.py --status [uptime] [viewers] owner command: status report (writes OUT)
     python ask.py --beg <user> <balance> <subscriber>   !beg: Opie may gift currency (writes OUT + BEG_OUT)
     python ask.py --promo [beg|roast|news|random]   Opie plugs one of his commands, for a Mix It Up timer (writes OUT)
+    python ask.py --tip <user> <amount> <balance>   tip Opie currency to win back his favor (writes OUT + TIP_OUT)
     python ask.py --news <user>             Opie's Weird News: a real bizarre story from the past week (writes OUT)
     python ask.py --chime on|off|status            mod command: let Opie butt into chat on his own (writes OUT)
 
@@ -19,9 +20,9 @@ Every reply is also printed. --log prints nothing unless Opie decides to talk (a
 mentioning him, or an unprompted chime-in), so a bot can post the output whenever it isn't empty.
 Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
-import sys, os, io, re, json, time, random, logging, contextlib, datetime, urllib.request, urllib.parse
+import sys, os, io, re, json, time, random, shutil, logging, traceback, contextlib, datetime, urllib.request, urllib.parse
 
-VERSION = "4.2"                          # bump when ask.py changes
+VERSION = "4.3"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -36,6 +37,10 @@ EXEMPT = {"steveyellowstream", "stevefromtheblock"}   # lowercase names that ski
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(HERE, "opie_state.json")
 LOCK_FILE = STATE_FILE + ".lock"
+BACKUP_DIR = os.path.join(HERE, "opie_backups")   # one copy of opie_state.json per day
+BACKUP_DAYS = 7                          # how many daily backups to keep
+ERROR_LOG = os.path.join(HERE, "opie_errors.log") # what went wrong, so it never ends up in chat
+ERROR_LOG_MAX = 200_000                  # bytes; older entries are trimmed past this
 
 # --- chat memory ---
 CHAT_KEEP = 100                          # chat lines kept on disk
@@ -170,6 +175,13 @@ BEG_MOOD = {                             # mood: (odds multiplier, gift multipli
     "nostalgic": (1.1, 1.05),
 }
 BIG_LOSS = 100000                        # a loss this big (or bigger) gets a snarky quip
+
+# --- !tip: paying Opie buys back his favor ---
+TIP_OUT = os.environ.get("OPIE_TIP_OUT", r"D:\DOODA\streamscripts\tip_amount.txt")   # amount to take from the tipper, 0 if none
+TIP_MIN = 100                            # smallest tip he'll accept
+TIP_ATTITUDE_PER_1000 = 5                # attitude points forgiven per 1,000 tipped
+SUPERTIP = 25000                         # this much or more is a SUPERTIP: wipes the slate clean and he loses his mind
+MEGATIP = 250000                         # ...and this much makes you his favorite person alive
 LOSS_PATTERN = re.compile(r"@([\w.\-]+)\W+you lost ([\d,]+)", re.I)   # matches "Dang @bob, you lost 150000!"
 
 # --- attitude (0-100 per user) ---
@@ -316,12 +328,58 @@ class StateLock:
         except OSError:
             pass
 
+def log_error(where):
+    """Append the current exception to ERROR_LOG (never to chat)."""
+    try:
+        if os.path.exists(ERROR_LOG) and os.path.getsize(ERROR_LOG) > ERROR_LOG_MAX:
+            with open(ERROR_LOG, encoding="utf-8", errors="replace") as f:
+                keep = f.read()[-ERROR_LOG_MAX // 2:]
+            with open(ERROR_LOG, "w", encoding="utf-8") as f:
+                f.write(keep)
+        with open(ERROR_LOG, "a", encoding="utf-8") as f:
+            f.write(f"\n=== {datetime.datetime.now():%Y-%m-%d %H:%M:%S} v{VERSION} | {where} | args: {sys.argv[1:]}\n")
+            f.write(traceback.format_exc())
+    except Exception:
+        pass
+
+def backup_state():
+    """Once a day, copy opie_state.json into BACKUP_DIR and drop backups older than BACKUP_DAYS."""
+    try:
+        target = os.path.join(BACKUP_DIR, f"opie_state-{datetime.date.today().isoformat()}.json")
+        if os.path.exists(target) or not os.path.exists(STATE_FILE):
+            return
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        with open(STATE_FILE, encoding="utf-8") as f:
+            json.load(f)                 # never back up a damaged file over a good one
+        shutil.copyfile(STATE_FILE, target)
+        for old in sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith("opie_state-"))[:-BACKUP_DAYS]:
+            os.remove(os.path.join(BACKUP_DIR, old))
+    except Exception:
+        log_error("backup")
+
+def restore_backup():
+    """opie_state.json is damaged: fall back to the newest backup that loads."""
+    try:
+        for name in sorted((f for f in os.listdir(BACKUP_DIR) if f.startswith("opie_state-")), reverse=True):
+            try:
+                with open(os.path.join(BACKUP_DIR, name), encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+    except OSError:
+        pass
+    return {}
+
 def load_state():
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             state = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
         state = {}
+    except json.JSONDecodeError:
+        log_error("opie_state.json was damaged, restored from backup")
+        shutil.copyfile(STATE_FILE, STATE_FILE + ".damaged")   # keep the broken one in case it's needed
+        state = restore_backup()
     state.setdefault("chat", [])
     state.setdefault("users", {})
     state.setdefault("chime_on", CHIME_DEFAULT_ON)
@@ -452,8 +510,12 @@ def ollama(messages):
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.load(resp)["message"]["content"]
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.load(resp)["message"]["content"]
+    except Exception:
+        log_error("ollama")              # callers fall back to a canned line, the log says why
+        raise
 
 def fit(reply):
     if len(reply) <= MAX_CHARS:
@@ -1007,6 +1069,87 @@ def cmd_promo(topic):
     write(reply)
     update_state(lambda state: add_chat(state, BOT_NAME, reply.replace("\n", " ")))
 
+def parse_amount(raw, balance):
+    """'500', '1,000', '5k', '1.5m' or 'all' -> int, or None."""
+    raw = (raw or "").replace(",", "").strip().lower()
+    if raw in ("all", "everything", "max") and balance is not None:
+        return balance
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)([km]?)", raw)
+    if not m:
+        return None
+    return int(float(m.group(1)) * {"": 1, "k": 1000, "m": 1_000_000}[m.group(2)])
+
+def write_tip(amount):
+    with open(TIP_OUT, "w", encoding="utf-8") as f:
+        f.write(str(amount))
+
+def cmd_tip(user, raw_amount="", raw_balance=""):
+    user = user.lstrip("@")
+    key = norm(user)
+    write_tip(0)
+    balance = parse_balance(raw_balance)
+    if balance is None:
+        write(f"@{user} I can't see your wallet right now, brothaman. Try again in a bit.")
+        return
+    amount = parse_amount(raw_amount, balance)
+    if amount is None:
+        write(f"@{user} tip me how much? e.g. !tip 5000, brothaman.")
+        return
+    if amount < TIP_MIN:
+        write(f"@{user} {amount:,} {CURRENCY}? Keep it. Tips start at {TIP_MIN:,}, brothaman.")
+        return
+    if amount > balance:
+        write(f"@{user} you've only got {balance:,} {CURRENCY}. Nice try, brothaman.")
+        return
+
+    def apply(state):
+        u = get_user(state, key)
+        before = level(u["dis"])
+        if amount >= SUPERTIP:
+            u["dis"] = 0.0
+        else:
+            u["dis"] = max(0.0, u["dis"] - amount / 1000 * TIP_ATTITUDE_PER_1000)
+        u["tipped"] = u.get("tipped", 0) + amount
+        state["wine_fund"] = state.get("wine_fund", 0) + amount
+        return {"before": before, "after": level(u["dis"]), "total": u["tipped"], "fund": state["wine_fund"],
+                "mood": current_mood(state)}
+    ctx = update_state(apply)
+    write_tip(amount)
+
+    size = ("MEGATIP" if amount >= MEGATIP else "SUPERTIP" if amount >= SUPERTIP else
+            "decent tip" if amount >= 5000 else "small tip")
+    lead = f"{amount:,} {CURRENCY} {size if size in ('MEGATIP', 'SUPERTIP') else 'tip'}!"
+    facts = [f"{user} just tipped you {amount:,} {CURRENCY}. That's a {size}.",
+             f"Your reply will be posted right after the words \"{lead}\". Don't mention any numbers yourself."]
+    if size == "MEGATIP":
+        facts.append("You're losing your mind with joy: they're your new favorite person alive, gush over them.")
+    elif size == "SUPERTIP":
+        facts.append("You LOVE supertips. Go over the top thanking them, and all is forgiven.")
+    elif size == "small tip":
+        facts.append("It's a bit cheap. Thank them, but rib them for being stingy.")
+    else:
+        facts.append("Thank them in your style.")
+    if ctx["before"] != "CHILL":
+        facts.append(f"They were on your bad side ({ctx['before']}). " +
+                     ("Now they're back in your good graces." if ctx["after"] == "CHILL" else "It helps, but they're not fully forgiven yet."))
+    system = f"{SYSTEM} {ctx['mood']} You run on tips and wine. One or two short sentences."
+    try:
+        text = re.sub(r"\s+", " ", ollama([
+            {"role": "system", "content": system},
+            {"role": "user", "content": "\n".join(facts)},
+        ])).strip()
+        text = scrub(RUDE_LEAD.sub("", re.sub(re.escape(RUDE_TAG), "", text, flags=re.I)).strip())
+    except Exception:
+        text = ""
+    text = re.sub(r"^@?" + re.escape(user) + r"[,:]?\s*", "", text, flags=re.I)
+    text = text or ("You beautiful human, I'm naming my next bottle after you!" if amount >= SUPERTIP else
+                    "Into the wine fund it goes, brothaman.")
+    if text[:1].islower():
+        text = text[0].upper() + text[1:]
+    reply = split_reply(f"@{user} {lead} {text}")
+    write(reply)
+    update_state(lambda state: add_chat(state, BOT_NAME, reply.replace("\n", " ")))
+
 def cmd_chime(setting):
     setting = setting.lower()
     if setting in ("on", "1", "yes", "true", "off", "0", "no", "false"):
@@ -1217,7 +1360,7 @@ def respond(user, question, logged):
     return reply
 
 
-if __name__ == "__main__":
+def main():
     args = sys.argv[1:]
     flag = args[0] if args and args[0].startswith("--") else None
     if flag:
@@ -1239,9 +1382,24 @@ if __name__ == "__main__":
         cmd_promo(user if args else "")
     elif flag == "--beg":
         cmd_beg(user, *(args[1:] + ["", ""])[:2])
+    elif flag == "--tip":
+        cmd_tip(user, *(args[1:] + ["", ""])[:2])
     elif flag == "--news":
         cmd_news(user)
     elif flag == "--roast":
         cmd_roast(user, rest)
     else:
         cmd_ask(user, rest)
+
+if __name__ == "__main__":
+    backup_state()
+    try:
+        main()
+    except Exception:
+        log_error("crash")
+        # plain chat lines (--log) stay silent; commands get a short in-character notice instead of a traceback
+        if "--log" not in sys.argv[1:2]:
+            try:
+                write("Opie hit a snag, brothaman. Try that again in a sec.")
+            except Exception:
+                pass
