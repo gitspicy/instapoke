@@ -1,4 +1,4 @@
-# Opie AI (v4.3)
+# Opie AI (v4.4)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -223,6 +223,8 @@ Rules: he only gives to people he likes (attitude CHILL). Each "no" comes with a
 | `TIP_MIN` | `100` | Smallest tip accepted |
 | `TIP_ATTITUDE_PER_1000` | `5` | Attitude points forgiven per 1,000 tipped |
 | `SUPERTIP` / `MEGATIP` | `25000` / `250000` | Tip sizes that wipe the slate clean and get the over-the-top treatment |
+| `BAD_TIP_POINTS` | `10` | Tipping under `TIP_MIN` is an insult: refused, roasted, attitude goes up this much |
+| `CHEAP_TIP_MIN_BALANCE` / `CHEAP_TIP_RATIO` / `CHEAP_TIP_POINTS` | `100000` / `0.01` / `5` | Anyone with 100k+ who tips under 1% of it is a cheapskate: tip taken, no forgiveness, attitude goes up 5 |
 
 ### Backups and errors
 | Variable | Default | What it does |

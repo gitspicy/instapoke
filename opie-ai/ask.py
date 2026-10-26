@@ -22,7 +22,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, shutil, logging, traceback, contextlib, datetime, urllib.request, urllib.parse
 
-VERSION = "4.3"                          # bump when ask.py changes
+VERSION = "4.4"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -182,6 +182,10 @@ TIP_MIN = 100                            # smallest tip he'll accept
 TIP_ATTITUDE_PER_1000 = 5                # attitude points forgiven per 1,000 tipped
 SUPERTIP = 25000                         # this much or more is a SUPERTIP: wipes the slate clean and he loses his mind
 MEGATIP = 250000                         # ...and this much makes you his favorite person alive
+BAD_TIP_POINTS = 10                      # tipping under TIP_MIN is an insult: refused, and attitude goes up this much
+CHEAP_TIP_MIN_BALANCE = 100000           # people with at least this much...
+CHEAP_TIP_RATIO = 0.01                   # ...who tip under 1% of it are cheapskates: taken, no forgiveness...
+CHEAP_TIP_POINTS = 5                     # ...and attitude goes up this much
 LOSS_PATTERN = re.compile(r"@([\w.\-]+)\W+you lost ([\d,]+)", re.I)   # matches "Dang @bob, you lost 150000!"
 
 # --- attitude (0-100 per user) ---
@@ -1095,41 +1099,57 @@ def cmd_tip(user, raw_amount="", raw_balance=""):
     if amount is None:
         write(f"@{user} tip me how much? e.g. !tip 5000, brothaman.")
         return
-    if amount < TIP_MIN:
-        write(f"@{user} {amount:,} {CURRENCY}? Keep it. Tips start at {TIP_MIN:,}, brothaman.")
-        return
-    if amount > balance:
+    bad = amount < TIP_MIN
+    if amount > balance and not bad:
         write(f"@{user} you've only got {balance:,} {CURRENCY}. Nice try, brothaman.")
         return
+    cheap = not bad and balance >= CHEAP_TIP_MIN_BALANCE and amount < balance * CHEAP_TIP_RATIO and amount < SUPERTIP
 
     def apply(state):
         u = get_user(state, key)
         before = level(u["dis"])
-        if amount >= SUPERTIP:
+        if bad:                          # an insult: refused, nothing taken
+            u["bad_tips"] = u.get("bad_tips", 0) + 1
+            bump(state, key, BAD_TIP_POINTS)
+            return {"before": before, "after": level(u["dis"]), "strikes": u["bad_tips"], "mood": current_mood(state)}
+        if cheap:                        # taken, but it buys no forgiveness
+            u["bad_tips"] = u.get("bad_tips", 0) + 1
+            bump(state, key, CHEAP_TIP_POINTS)
+        elif amount >= SUPERTIP:
             u["dis"] = 0.0
         else:
             u["dis"] = max(0.0, u["dis"] - amount / 1000 * TIP_ATTITUDE_PER_1000)
         u["tipped"] = u.get("tipped", 0) + amount
         state["wine_fund"] = state.get("wine_fund", 0) + amount
         return {"before": before, "after": level(u["dis"]), "total": u["tipped"], "fund": state["wine_fund"],
-                "mood": current_mood(state)}
+                "strikes": u.get("bad_tips", 0), "mood": current_mood(state)}
     ctx = update_state(apply)
-    write_tip(amount)
+    if not bad:
+        write_tip(amount)
 
-    size = ("MEGATIP" if amount >= MEGATIP else "SUPERTIP" if amount >= SUPERTIP else
-            "decent tip" if amount >= 5000 else "small tip")
-    lead = f"{amount:,} {CURRENCY} {size if size in ('MEGATIP', 'SUPERTIP') else 'tip'}!"
-    facts = [f"{user} just tipped you {amount:,} {CURRENCY}. That's a {size}.",
+    size = ("insult" if bad else "cheap" if cheap else "MEGATIP" if amount >= MEGATIP else
+            "SUPERTIP" if amount >= SUPERTIP else "decent tip" if amount >= 5000 else "small tip")
+    lead = (f"{amount:,} {CURRENCY}?" if bad else f"{amount:,} {CURRENCY} tip? That's it?" if cheap else
+            f"{amount:,} {CURRENCY} {size if size in ('MEGATIP', 'SUPERTIP') else 'tip'}!")
+    facts = [f"{user} just tried to tip you {amount:,} {CURRENCY}.",
              f"Your reply will be posted right after the words \"{lead}\". Don't mention any numbers yourself."]
-    if size == "MEGATIP":
-        facts.append("You're losing your mind with joy: they're your new favorite person alive, gush over them.")
-    elif size == "SUPERTIP":
-        facts.append("You LOVE supertips. Go over the top thanking them, and all is forgiven.")
-    elif size == "small tip":
-        facts.append("It's a bit cheap. Thank them, but rib them for being stingy.")
-    else:
-        facts.append("Thank them in your style.")
-    if ctx["before"] != "CHILL":
+    if bad:
+        facts.append(f"That's an insult (tips start at {TIP_MIN:,}). You're offended: refuse it, roast them for it, "
+                     "and tell them it's going on their record.")
+    elif cheap:
+        facts.append("They're loaded and tipped you pocket lint. You'll take it, but you're offended: "
+                     "roast them for being a cheapskate. It buys them no forgiveness.")
+    if (bad or cheap) and ctx["strikes"] > 1:
+        facts.append(f"This is cheap tip number {ctx['strikes']} from them. Call out the pattern.")
+    reactions = {
+        "MEGATIP": "You're losing your mind with joy: they're your new favorite person alive, gush over them.",
+        "SUPERTIP": "You LOVE supertips. Go over the top thanking them, and all is forgiven.",
+        "small tip": "It's a bit cheap. Thank them, but rib them for being stingy.",
+        "decent tip": "Thank them in your style.",
+    }
+    if size in reactions:
+        facts.append(reactions[size])
+    if ctx["before"] != "CHILL" and not (bad or cheap):
         facts.append(f"They were on your bad side ({ctx['before']}). " +
                      ("Now they're back in your good graces." if ctx["after"] == "CHILL" else "It helps, but they're not fully forgiven yet."))
     system = f"{SYSTEM} {ctx['mood']} You run on tips and wine. One or two short sentences."
@@ -1142,7 +1162,9 @@ def cmd_tip(user, raw_amount="", raw_balance=""):
     except Exception:
         text = ""
     text = re.sub(r"^@?" + re.escape(user) + r"[,:]?\s*", "", text, flags=re.I)
-    text = text or ("You beautiful human, I'm naming my next bottle after you!" if amount >= SUPERTIP else
+    text = text or ("Keep your pocket change, cheapskate. That's going on your record." if bad else
+                    "Wow. Really breaking the bank there, brothaman." if cheap else
+                    "You beautiful human, I'm naming my next bottle after you!" if amount >= SUPERTIP else
                     "Into the wine fund it goes, brothaman.")
     if text[:1].islower():
         text = text[0].upper() + text[1:]
