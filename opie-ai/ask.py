@@ -20,7 +20,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, logging, contextlib, datetime, urllib.request, urllib.parse
 
-VERSION = "3.9"                          # bump when ask.py changes
+VERSION = "4.0"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -899,7 +899,8 @@ def cmd_beg(user, raw_balance="", raw_sub=""):
             return {**ctx, "outcome": "deny", "reason": f"{user} has been rude to you lately (your attitude toward them is {ctx['attitude']})."}
         tier, lo, hi = beg_tier(balance)
         if not tier:
-            return {**ctx, "outcome": "deny", "reason": f"{user} is sitting on {balance:,} {CURRENCY} and should go gamble it instead of begging."}
+            return {**ctx, "outcome": "deny", "rich": True,
+                    "reason": f"{user} is already loaded and should go gamble it instead of begging."}
 
         engaged = any(norm(n) == key and not t.startswith("!") for _, n, t in state["chat"][-CHAT_KEEP:]) or \
                   any(norm(n) in BOT_ACCOUNTS and "@" + key in t.lower() for _, n, t in state["chat"][-CHAT_KEEP:])
@@ -922,13 +923,17 @@ def cmd_beg(user, raw_balance="", raw_sub=""):
         write(f"@{user} that's {ctx['count']} begs today, you only get {BEGS_PER_DAY}. Have some dignity, brothaman.")
         return
 
-    facts = [f"{user} is begging you for free {CURRENCY}. This is beg {min(ctx['count'], BEGS_PER_DAY)} of {BEGS_PER_DAY} today.",
-             f"They have {balance:,} {CURRENCY}" + (" and they're a subscriber." if sub else ".")]
+    # the script states the numbers itself, in plain words, so the model can't garble them ("2000K")
+    lead = (f"you get {ctx['amount']:,} {CURRENCY}!" if ctx["outcome"] == "award" else
+            f"you've got {balance:,} {CURRENCY} already." if ctx.get("rich") else "")
+    facts = [f"{user} is begging you for free {CURRENCY}. This is beg {min(ctx['count'], BEGS_PER_DAY)} of {BEGS_PER_DAY} today."
+             + (" They're a subscriber." if sub else "")]
+    if lead:
+        facts.append(f"Your reply will be posted right after the words \"{lead}\". Don't mention any numbers or amounts yourself.")
     if ctx["habit"]:
         facts.append("They've begged almost every day this week. Call them out for it.")
     if ctx["outcome"] == "award":
-        facts.append(f"You're GIVING them exactly {ctx['amount']:,} {CURRENCY}. Say that exact number. "
-                     "Tell them to go spend it on the games, not hoard it.")
+        facts.append("You're giving them a gift. Tell them to go spend it on the games, not hoard it.")
     else:
         facts.append(f"You're saying NO. The reason: {ctx['reason']} Tell them why.")
         if ctx.get("last"):
@@ -945,14 +950,13 @@ def cmd_beg(user, raw_balance="", raw_sub=""):
         text = ""
     text = re.sub(r"^@?" + re.escape(user) + r"[,:]?\s*", "", text, flags=re.I)
     if ctx["outcome"] == "award":
-        if not text:
-            text = f"here's {ctx['amount']:,} {CURRENCY}. Go lose it on the games, brothaman."
-        elif f"{ctx['amount']:,}" not in text and str(ctx["amount"]) not in text:
-            text += f" (+{ctx['amount']:,} {CURRENCY})"          # the model must never get the amount wrong
+        text = text or "Go lose it on the games, brothaman."
         write_award(ctx["amount"])
     elif not text:
-        text = f"no {CURRENCY} for you today, brothaman."
-    reply = split_reply(f"@{user} {text}")
+        text = "Go gamble it, brothaman." if ctx.get("rich") else f"No {CURRENCY} for you today, brothaman."
+    if lead and text[:1].islower():
+        text = text[0].upper() + text[1:]
+    reply = split_reply(f"@{user} {lead} {text}".replace("  ", " "))
     write(reply)
     update_state(lambda state: add_chat(state, BOT_NAME, reply.replace("\n", " ")))
 
