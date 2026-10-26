@@ -13,6 +13,8 @@ Everything lives in `D:\DOODA\streamscripts\`:
 | `ai_reply2.txt` | Second message of a long reply, or `none` |
 | `ai_chime.txt` | Backup copy of the last in-chat reply or chime-in. Nothing reads it |
 | `tip_amount.txt` | Amount the last `!tip` should take from the tipper, or 0 |
+| `games.py` | Opie's games (Higher or Lower). Shares his brain with `ask.py`, so keep them in the same folder |
+| `game_charge.txt` / `game_pay.txt` | What the last games command should take from / give to the player |
 | `opie_backups\` | Daily copies of `opie_state.json` (last 7 days) |
 | `opie_errors.log` | What went wrong, if anything. Send it to Claude when something breaks |
 | `obs_password.txt` | Your OBS WebSocket password, one line. Optional; only needed for stream stats |
@@ -60,6 +62,37 @@ The first should print nothing. The second should print Opie's mood and edge.
 | `!opie-status` | Same as `opie status`, plus a viewer count from Mix It Up |
 
 ---
+
+## Games (`games.py`)
+
+### Higher or Lower
+One player at a time; everyone else queues. Opie flips a card, you call the next one higher or lower (ace high).
+5 guesses per game: a win doubles the pot, a push (same rank) uses a guess and changes nothing, a wrong guess loses it all.
+Survive all 5 and you take the pot. Bet 100 to 50,000, so the most you can win is 1.6M.
+
+| Type in chat | What happens |
+|---|---|
+| `!hilo 5000` | Start a game, or join the line (your bet is taken now) |
+| `!hilo` | Who's playing and who's waiting |
+| `!higher` / `!lower` | Your guess (only the current player) |
+| `!leave` | Leave the line, bet refunded |
+
+If the player stalls for 2 minutes and someone's waiting, they forfeit. Players Opie is HOSTILE or MUTINY with lose their bet and don't get a game.
+
+**Mix It Up:** every games command uses this pattern:
+1. External Program `python`, arguments below, Wait For Finish + Save Output
+2. Chat `$externalprogramresult` (plus the usual `ai_reply2.txt` second-message steps)
+3. File: read `D:\DOODA\streamscripts\game_charge.txt` into `gamecharge`; Conditional `$gamecharge` greater than `0` → Currency **subtract** `$gamecharge` from the user
+4. File: read `D:\DOODA\streamscripts\game_pay.txt` into `gamepay`; Conditional `$gamepay` greater than `0` → Currency **add** `$gamepay` to the user
+
+| Command | Arguments |
+|---|---|
+| `!hilo` | `"D:\DOODA\streamscripts\games.py" hilo "$username" "$arg1text" "<balance identifier>"` |
+| `!higher` | `"D:\DOODA\streamscripts\games.py" higher "$username"` |
+| `!lower` | `"D:\DOODA\streamscripts\games.py" lower "$username"` |
+| `!leave` | `"D:\DOODA\streamscripts\games.py" leave "$username"` |
+
+Settings at the top of `games.py`: `HILO_MIN_BET`, `HILO_MAX_BET`, `HILO_ROUNDS`, `HILO_WIN_MULT`, `HILO_TIMEOUT`, `HILO_QUEUE_MAX`, `HILO_NO_PLAY`.
 
 ## Mix It Up setup
 
@@ -277,6 +310,8 @@ Rules: he only gives to people he likes (attitude CHILL). Each "no" comes with a
 | `SEARCH_RESULTS` / `SNIPPET_CHARS` | `4` / `400` | How much search text the model sees |
 | `OBS_HOST` / `OBS_PORT` | `localhost` / `4455` | OBS WebSocket (OBS → Tools → WebSocket Server Settings) |
 | `OBS_PASSWORD_FILE` | `tip_amount.txt` | Amount the last `!tip` should take from the tipper, or 0 |
+| `games.py` | Opie's games (Higher or Lower). Shares his brain with `ask.py`, so keep them in the same folder |
+| `game_charge.txt` / `game_pay.txt` | What the last games command should take from / give to the player |
 | `opie_backups\` | Daily copies of `opie_state.json` (last 7 days) |
 | `opie_errors.log` | What went wrong, if anything. Send it to Claude when something breaks |
 | `obs_password.txt` | File holding the OBS password |
