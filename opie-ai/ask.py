@@ -11,7 +11,7 @@ Usage (wire these up in your stream bot):
     python ask.py --roast <user> <target>   roast someone using what they've said in chat (writes OUT)
     python ask.py --status [uptime] [viewers] owner command: status report (writes OUT)
     python ask.py --beg <user> <balance> <subscriber>   !beg: Opie may gift currency (writes OUT + BEG_OUT)
-    python ask.py --promo [beg|roast|news|tip|random]   Opie plugs one of his commands, for a Mix It Up timer (writes OUT)
+    python ask.py --promo [beg|roast|news|tip|hilo|random]   Opie plugs one of his commands, for a Mix It Up timer (writes OUT)
     python ask.py --tip <user> <amount> <balance>   tip Opie currency to win back his favor (writes OUT + TIP_OUT)
     python ask.py --news <user>             Opie's Weird News: a real bizarre story from the past week (writes OUT)
     python ask.py --chime on|off|status            mod command: let Opie butt into chat on his own (writes OUT)
@@ -22,7 +22,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, shutil, logging, traceback, contextlib, datetime, urllib.request, urllib.parse
 
-VERSION = "4.5"                          # bump when ask.py changes
+VERSION = "4.6"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -1040,12 +1040,16 @@ PROMOS = {                               # what each ad is about; the command mu
     "news": ("!weirdnews", "Viewers can type !weirdnews and you'll read them a real bizarre news story from this week."),
     "tip": ("!tip", f"Viewers can type !tip and an amount to tip you {CURRENCY}. Tips win back your favor if they've been on "
                     f"your bad side, and you LOVE supertips ({SUPERTIP:,}+), which wipe the slate clean. Cheap tips just annoy you."),
+    "hilo": ("!hilo", f"Viewers can type !hilo and a bet (up to 50,000 {CURRENCY}) to play Higher or Lower against you: "
+                      "call the next card higher or lower, survive 5 guesses and the pot grows every win, one wrong call loses it all. "
+                      "One player at a time, everyone else gets in line."),
 }
 PROMO_FALLBACKS = {
     "beg": f"Running low on {CURRENCY}? Type !beg and I might take pity on you, brothaman.",
     "roast": "Got a buddy who needs humbling? Type !roast @them and I'll handle it, brothaman.",
     "news": "The world's gone nuts and I've got the receipts. Type !weirdnews, brothaman.",
     "tip": "Wine doesn't buy itself. Type !tip and show Opie some love, brothaman. Supertips get you forgiven.",
+    "hilo": "Feeling lucky? Type !hilo and a bet, call five cards higher or lower, and try to take my money, brothaman.",
 }
 
 def cmd_promo(topic):
