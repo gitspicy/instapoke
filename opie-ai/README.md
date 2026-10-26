@@ -41,7 +41,7 @@ The first should print nothing. The second should print Opie's mood and edge.
 | `!beg` | Beg Opie for free N-persons. 3 begs every 6 hours, only 1 can pay out. Bigger gifts for broke viewers, subs and people who actually chat and gamble |
 | `!tip <amount>` | Tip Opie N-persons (`500`, `5k`, `all`). Every 1,000 knocks 5 off your attitude; 25k+ is a **SUPERTIP** (all forgiven), 250k+ a **MEGATIP** |
 
-### Owners only (`SteveYellowstream`, `stevefromtheblock`)
+### Owner only (`SteveYellowstream`)
 
 | Type in chat | What happens |
 |---|---|

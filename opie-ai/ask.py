@@ -33,7 +33,7 @@ BOT_ACCOUNTS = {"opieai"}                # lowercase chat names Opie posts as; t
 COMMAND = "!opie-ai"                     # the chat command that triggers a question
 
 COOLDOWN_SECONDS = 60                    # per-user cooldown
-EXEMPT = {"steveyellowstream", "stevefromtheblock"}   # lowercase names that skip cooldown + attitude
+EXEMPT = {"steveyellowstream"}   # lowercase names that skip cooldown + attitude
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(HERE, "opie_state.json")
 LOCK_FILE = STATE_FILE + ".lock"
@@ -50,7 +50,7 @@ USER_MEMORY = 3                          # past Q&A pairs remembered per user
 # --- talking to Opie without the command ---
 OPIE_NAMES = re.compile(r"@?opie(ai|-ai)?\b", re.I)   # a chat line mentioning one of these gets a reply
 NICKNAMES = re.compile(r"^\W*op\b", re.I)              # "op" to start a message...
-OWNERS = {"steveyellowstream", "stevefromtheblock"}   # lowercase names allowed to use owner-only controls
+OWNERS = {"steveyellowstream"}   # lowercase names allowed to use owner-only controls
 OBEY_USERS = {"steveyellowstream"}       # lowercase names who can switch Opie into obey mode...
 OBEY_WORDS = ["please"]                  # ...by putting one of these words in their message: no attitude, straight answer
 OBEY = re.compile(r"\b(" + "|".join(re.escape(w) for w in OBEY_WORDS) + r")\b", re.I)
