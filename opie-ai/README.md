@@ -1,4 +1,4 @@
-# Opie AI (v4.6)
+# Opie AI (v4.7)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -45,6 +45,7 @@ The first should print nothing. The second should print Opie's mood and edge.
 
 | Type in chat | What happens |
 |---|---|
+| Any question with **please** in it (`steveyellowstream` only) | **Obey mode:** Opie drops the act and gives a straight, accurate answer with no attitude |
 | `op <anything>` | Same as saying "opie": the nickname only works for owners |
 | `opie status` / `op status` / `!ai status` | Full status report: version, mood + edge, Brain/Search health, OBS stream stats, uptime, users he's upset with, chat activity, chime-ins |
 | `opie cpu` / `opie stream` / `opie stats` / `!ai cpu` | Quick OBS check only: bitrate, dropped frames, fps, OBS CPU %, uptime. No grudge list |
@@ -191,6 +192,8 @@ python ask.py --status "" ""
 | Variable | Default | What it does |
 |---|---|---|
 | `OWNERS` | your two accounts | Can use `op`, status, and edge controls |
+| `OBEY_USERS` | `{"steveyellowstream"}` | Who can put Opie in obey mode |
+| `OBEY_WORDS` | `["please"]` | Trigger words for obey mode (whole words, any capitals) |
 | `NICKNAME_USERS` | `OWNERS` | Who can call him "op" |
 | `EXEMPT` | your two accounts | Skip cooldowns and never build attitude |
 

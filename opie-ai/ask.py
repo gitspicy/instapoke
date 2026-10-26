@@ -22,7 +22,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, shutil, logging, traceback, contextlib, datetime, urllib.request, urllib.parse
 
-VERSION = "4.6"                          # bump when ask.py changes
+VERSION = "4.7"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -51,6 +51,9 @@ USER_MEMORY = 3                          # past Q&A pairs remembered per user
 OPIE_NAMES = re.compile(r"@?opie(ai|-ai)?\b", re.I)   # a chat line mentioning one of these gets a reply
 NICKNAMES = re.compile(r"^\W*op\b", re.I)              # "op" to start a message...
 OWNERS = {"steveyellowstream", "stevefromtheblock"}   # lowercase names allowed to use owner-only controls
+OBEY_USERS = {"steveyellowstream"}       # lowercase names who can switch Opie into obey mode...
+OBEY_WORDS = ["please"]                  # ...by putting one of these words in their message: no attitude, straight answer
+OBEY = re.compile(r"\b(" + "|".join(re.escape(w) for w in OBEY_WORDS) + r")\b", re.I)
 NICKNAME_USERS = OWNERS                  # ...the "op" nickname only works for these
 STATUS_ASK = re.compile(r"^\W*(@?opie(ai|-ai)?|op)?\W*(status|status report|report|sitrep)\W*$", re.I)   # owners only
 STREAM_ASK = re.compile(r"^\W*(@?opie(ai|-ai)?|op)?\W*(cpu|stream|obs|health|stats)\W*$", re.I)   # owners only
@@ -571,6 +574,15 @@ SYSTEM = (
     f"If the viewer's message is genuinely insulting or hostile toward you, start your reply with {RUDE_TAG} (it gets stripped). Don't use it for normal ribbing. "
     "Reply in plain text with no stage directions or actions in brackets or asterisks, one or two short sentences, under 170 characters. Only go longer if the question really needs it, and never past 350 characters. No markdown, no lists, no emojis, no filler."
 )
+
+OBEY_SYSTEM = (
+    "You are Opie AI in straight-answer mode for the streamer, SteveYellowstream, your boss. He asked nicely, so drop the act "
+    "completely: no attitude, no sarcasm, no jokes, no roasting, no catchphrases, no character. Do exactly what he asks. "
+    "Answer accurately, helpfully and directly, using the recent chat and search results when they're relevant. "
+    "If you don't know or can't do something, say so plainly. "
+    "You have no access to the computer you run on (files, commands, sensors, settings), so never make any of that up. "
+    + HARD_LIMITS + " "
+    "Plain text, no markdown, no lists, no emojis, under 350 characters.")
 
 MOOD_NOTES = {
     "CHILL": "",
@@ -1302,7 +1314,8 @@ def respond(user, question, logged):
         u = get_user(state, key)
         if not logged:
             score_message(state, key, question, directed=True)
-        exploit = bool(EXPLOIT.search(question))
+        obey = key in OBEY_USERS and bool(OBEY.search(question))
+        exploit = bool(EXPLOIT.search(question)) and not obey
         if exploit:
             bump(state, key, EXPLOIT_POINTS)
             u["exploits"] = u.get("exploits", 0) + 1
@@ -1321,7 +1334,7 @@ def respond(user, question, logged):
             u["cooldown"] = time.time()
             return {"exploit": u["exploits"], "daily": current_mood(state)}
         return {"mood": mood, "chat": chat, "memory": list(u.get("memory", [])), "total": len(state["chat"]),
-                "daily": current_mood(state)}
+                "daily": current_mood(state), "obey": obey}
     ctx = update_state(prepare)
 
     if "exploit" in ctx:
@@ -1336,12 +1349,16 @@ def respond(user, question, logged):
         mood = "MUTINY"
 
     # --- build the prompt ---
-    system = SYSTEM + " " + ctx["daily"]
-    if MOOD_NOTES[mood]:
-        system += " " + MOOD_NOTES[mood]
-    messages = [{"role": "system", "content": system}]
-    for q, a in ctx["memory"]:
-        messages += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
+    if ctx["obey"]:                      # the boss said the magic word: drop the act entirely
+        system = OBEY_SYSTEM
+        messages = [{"role": "system", "content": system}]
+    else:
+        system = SYSTEM + " " + ctx["daily"]
+        if MOOD_NOTES[mood]:
+            system += " " + MOOD_NOTES[mood]
+        messages = [{"role": "system", "content": system}]
+        for q, a in ctx["memory"]:
+            messages += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
 
     parts = []
     if ctx["chat"]:
@@ -1353,7 +1370,7 @@ def respond(user, question, logged):
             parts.append(
                 "Web search results (use them if relevant, trust them over your own memory for "
                 f"recent facts, and don't mention that you searched):\n{results}")
-    if reminder := sports_reminder(question):
+    if not ctx["obey"] and (reminder := sports_reminder(question)):
         parts.append(reminder)
     parts.append(f"Viewer {user} says to you: {question}")
     messages.append({"role": "user", "content": "\n\n".join(parts)})
