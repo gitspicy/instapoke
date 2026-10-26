@@ -136,7 +136,7 @@ def cmd_hilo(user, raw_bet="", raw_balance=""):
             return "busy", f"@{user} you're already #{spot} in line. Patience, brothaman."
         bumped = ""
         if game and time.time() - game["last"] > HILO_TIMEOUT:
-            bumped = f"{game['player']} fell asleep at the table and forfeits {int(game['bet'] * HILO_WIN_MULT ** game['wins']):,}. "
+            bumped = f"{game['player']} fell asleep at the table and forfeits their {game['bet']:,} bet. "
             state["wine_fund"] = state.get("wine_fund", 0) + game["bet"]
             game = None
             state["hilo"] = None
@@ -185,11 +185,11 @@ def cmd_guess(user, guess):
         pot = int(game["bet"] * HILO_WIN_MULT ** game["wins"])
 
         if result == "lose":
-            lost = int(game["bet"] * HILO_WIN_MULT ** game["wins"])
-            state["wine_fund"] = state.get("wine_fund", 0) + game["bet"]
-            situation = (f"{user} just lost a {lost:,} pot at Higher or Lower on guess {game['round']} of {HILO_ROUNDS}. "
+            lost = game["bet"]               # only the wager was ever taken; the pot was never theirs yet
+            state["wine_fund"] = state.get("wine_fund", 0) + lost
+            situation = (f"{user} just lost their bet at Higher or Lower on guess {game['round']} of {HILO_ROUNDS}. "
                          "Gloat, or rub it in.")
-            return 0, f"@{user} {shown} WRONG. You lose {lost:,} {ask.CURRENCY}.", (situation, random.choice(LOSE_LINES),
+            return 0, f"@{user} {shown} WRONG. You lose your {lost:,} {ask.CURRENCY} bet.", (situation, random.choice(LOSE_LINES),
                                                                                        next_in_line(state))
         if game["round"] >= HILO_ROUNDS:
             situation = (f"{user} survived all {HILO_ROUNDS} guesses at Higher or Lower and walks away with {pot:,} "
