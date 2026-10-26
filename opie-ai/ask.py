@@ -10,6 +10,7 @@ Usage (wire these up in your stream bot):
                                             edge 0-3: set the edge level (owners only) (writes OUT)
     python ask.py --roast <user> <target>   roast someone using what they've said in chat (writes OUT)
     python ask.py --status [uptime] [viewers] owner command: status report (writes OUT)
+    python ask.py --beg <user> <balance> <subscriber>   !beg: Opie may gift currency (writes OUT + BEG_OUT)
     python ask.py --news <user>             Opie's Weird News: a real bizarre story from the past week (writes OUT)
     python ask.py --chime on|off|status            mod command: let Opie butt into chat on his own (writes OUT)
 
@@ -17,9 +18,9 @@ Every reply is also printed. --log prints nothing unless Opie decides to talk (a
 mentioning him, or an unprompted chime-in), so a bot can post the output whenever it isn't empty.
 Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
-import sys, os, io, re, json, time, random, logging, contextlib, urllib.request, urllib.parse
+import sys, os, io, re, json, time, random, logging, contextlib, datetime, urllib.request, urllib.parse
 
-VERSION = "3.8"                          # bump when ask.py changes
+VERSION = "3.9"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -143,6 +144,29 @@ NEWS_SKIP = re.compile(                  # tragedy isn't weird news: skip storie
 
 # --- gambling commentary ---
 CURRENCY = "N-persons"
+
+# --- !beg: Opie hands out currency to people who need it and play the games ---
+BEG_OUT = os.environ.get("OPIE_BEG_OUT", r"D:\DOODA\streamscripts\beg_award.txt")   # amount to give, 0 if nothing
+BEGS_PER_DAY = 3                         # chances per day (resets at midnight); only one can pay out
+BEG_TIERS = [                            # (balance up to, smallest gift, biggest gift): poorer = bigger gifts
+    (1000, 10000, 50000),                # tier 1: broke
+    (10000, 4000, 20000),                # tier 2
+    (50000, 1000, 5000),                 # tier 3
+    (999999, 50, 1000),                  # tier 4: doing fine
+]                                        # 1,000,000+ gets nothing
+BEG_CHANCE = 0.55                        # base odds a beg pays out (if he likes you and you qualify)
+BEG_SUB_BONUS = 0.15                     # subscribers: better odds...
+BEG_SUB_MULT = 1.25                      # ...and bigger gifts
+BEG_ENGAGED_BONUS = 0.15                 # chatted or gambled recently: better odds (he wants points spent, not hoarded)
+BEG_LURKER_PENALTY = 0.20                # only shows up to beg: worse odds
+BEG_HABIT_DAYS = 5                       # begged this many of the last 7 days = serial beggar...
+BEG_HABIT_PENALTY = 0.15                 # ...worse odds, and he calls it out
+BEG_MOOD = {                             # mood: (odds multiplier, gift multiplier). Above 1.0 can beat the tier max by that much
+    "bitter": (0.5, 0.25),
+    "wine-drunk": (0.6, 0.35),           # he's a jerk when he's drunk
+    "manic": (1.2, 1.10),
+    "nostalgic": (1.1, 1.05),
+}
 BIG_LOSS = 100000                        # a loss this big (or bigger) gets a snarky quip
 LOSS_PATTERN = re.compile(r"@([\w.\-]+)\W+you lost ([\d,]+)", re.I)   # matches "Dang @bob, you lost 150000!"
 
@@ -821,6 +845,117 @@ def cmd_news(user):
         add_chat(state, BOT_NAME, reply.replace("\n", " "))
     update_state(finish)
 
+def parse_balance(raw):
+    raw = (raw or "").replace(",", "").strip()
+    return int(float(raw)) if re.fullmatch(r"\d+(\.\d+)?", raw) else None
+
+def is_subscriber(raw):
+    raw = (raw or "").strip().lower()
+    return raw in ("true", "yes", "y", "1", "sub", "subscriber") or (raw.isdigit() and int(raw) > 0)
+
+def beg_tier(balance):
+    for i, (top, lo, hi) in enumerate(BEG_TIERS, 1):
+        if balance <= top:
+            return i, lo, hi
+    return None, 0, 0
+
+def write_award(amount):
+    with open(BEG_OUT, "w", encoding="utf-8") as f:
+        f.write(str(amount))
+
+def cmd_beg(user, raw_balance="", raw_sub=""):
+    user = user.lstrip("@")
+    key = norm(user)
+    write_award(0)
+    balance = parse_balance(raw_balance)
+    if balance is None:                  # Mix It Up didn't fill in the balance: don't burn a beg over it
+        write(f"@{user} I can't see your wallet right now, brothaman. Try again in a bit.")
+        return
+    sub = is_subscriber(raw_sub)
+    today = datetime.date.today().isoformat()
+    week = {(datetime.date.today() - datetime.timedelta(days=d)).isoformat() for d in range(7)}
+
+    def decide(state):
+        u = get_user(state, key)
+        beg = u.get("beg", {})
+        if beg.get("day") != today:
+            beg = {"day": today, "count": 0, "awarded": 0}
+        days = [d for d in u.get("beg_days", []) if d in week]
+        if today not in days:
+            days.append(today)
+        u["beg_days"] = days
+        beg["count"] += 1
+        u["beg"] = beg
+        ctx = {"count": beg["count"], "mood": current_mood(state), "habit": len(days) >= BEG_HABIT_DAYS,
+               "attitude": "CHILL" if key in EXEMPT else level(u["dis"])}
+        mood = state["mood"]
+
+        if beg["count"] > BEGS_PER_DAY:
+            bump(state, key, IMPATIENT_POINTS)
+            return {**ctx, "outcome": "over"}
+        if beg["awarded"]:
+            return {**ctx, "outcome": "deny", "reason": f"{user} already got {beg['awarded']:,} {CURRENCY} from you today and is back for more."}
+        if ctx["attitude"] != "CHILL":
+            return {**ctx, "outcome": "deny", "reason": f"{user} has been rude to you lately (your attitude toward them is {ctx['attitude']})."}
+        tier, lo, hi = beg_tier(balance)
+        if not tier:
+            return {**ctx, "outcome": "deny", "reason": f"{user} is sitting on {balance:,} {CURRENCY} and should go gamble it instead of begging."}
+
+        engaged = any(norm(n) == key and not t.startswith("!") for _, n, t in state["chat"][-CHAT_KEEP:]) or \
+                  any(norm(n) in BOT_ACCOUNTS and "@" + key in t.lower() for _, n, t in state["chat"][-CHAT_KEEP:])
+        odds_mult, gift_mult = BEG_MOOD.get(mood, (1.0, 1.0))
+        odds = (BEG_CHANCE + (BEG_SUB_BONUS if sub else 0) + (BEG_ENGAGED_BONUS if engaged else -BEG_LURKER_PENALTY)
+                - (BEG_HABIT_PENALTY if ctx["habit"] else 0)) * odds_mult
+        if random.random() >= odds:
+            why = (f"You're in a foul {mood} mood and don't feel generous." if odds_mult < 1 else
+                   f"{user} never chats or plays the games, they just show up to beg." if not engaged else
+                   f"{user} begs every single day." if ctx["habit"] else "You just don't feel like it right now.")
+            return {**ctx, "outcome": "deny", "reason": why, "last": beg["count"] == BEGS_PER_DAY}
+        amount = random.uniform(lo, hi) * gift_mult * (BEG_SUB_MULT if sub else 1)
+        amount = min(amount, hi * max(gift_mult, 1))          # subs and good moods top out at the tier max (+10% in a great mood)
+        amount = max(50, int(round(amount / 50) * 50))         # tidy numbers
+        beg["awarded"] = amount
+        return {**ctx, "outcome": "award", "amount": amount, "tier": tier, "engaged": engaged}
+    ctx = update_state(decide)
+
+    if ctx["outcome"] == "over":
+        write(f"@{user} that's {ctx['count']} begs today, you only get {BEGS_PER_DAY}. Have some dignity, brothaman.")
+        return
+
+    facts = [f"{user} is begging you for free {CURRENCY}. This is beg {min(ctx['count'], BEGS_PER_DAY)} of {BEGS_PER_DAY} today.",
+             f"They have {balance:,} {CURRENCY}" + (" and they're a subscriber." if sub else ".")]
+    if ctx["habit"]:
+        facts.append("They've begged almost every day this week. Call them out for it.")
+    if ctx["outcome"] == "award":
+        facts.append(f"You're GIVING them exactly {ctx['amount']:,} {CURRENCY}. Say that exact number. "
+                     "Tell them to go spend it on the games, not hoard it.")
+    else:
+        facts.append(f"You're saying NO. The reason: {ctx['reason']} Tell them why.")
+        if ctx.get("last"):
+            facts.append("That was their last beg today and you said no every time: roast them hard for it.")
+    system = (f"{SYSTEM} {ctx['mood']} You're the channel's sugar daddy for {CURRENCY}: generous, but you hate freeloaders and hoarders. "
+              "One or two short sentences.")
+    try:
+        text = re.sub(r"\s+", " ", ollama([
+            {"role": "system", "content": system},
+            {"role": "user", "content": "\n".join(facts)},
+        ])).strip()
+        text = scrub(RUDE_LEAD.sub("", re.sub(re.escape(RUDE_TAG), "", text, flags=re.I)).strip())
+    except Exception:
+        text = ""
+    text = re.sub(r"^@?" + re.escape(user) + r"[,:]?\s*", "", text, flags=re.I)
+    if ctx["outcome"] == "award":
+        if not text:
+            text = f"here's {ctx['amount']:,} {CURRENCY}. Go lose it on the games, brothaman."
+        elif f"{ctx['amount']:,}" not in text and str(ctx["amount"]) not in text:
+            text += f" (+{ctx['amount']:,} {CURRENCY})"          # the model must never get the amount wrong
+        write_award(ctx["amount"])
+    elif not text:
+        text = f"no {CURRENCY} for you today, brothaman."
+    reply = split_reply(f"@{user} {text}")
+    write(reply)
+    update_state(lambda state: add_chat(state, BOT_NAME, reply.replace("\n", " ")))
+
 def cmd_chime(setting):
     setting = setting.lower()
     if setting in ("on", "1", "yes", "true", "off", "0", "no", "false"):
@@ -1049,6 +1184,8 @@ if __name__ == "__main__":
         cmd_chime(user)
     elif flag == "--status":
         cmd_status(*(args + ["", ""])[:2])
+    elif flag == "--beg":
+        cmd_beg(user, *(args[1:] + ["", ""])[:2])
     elif flag == "--news":
         cmd_news(user)
     elif flag == "--roast":
