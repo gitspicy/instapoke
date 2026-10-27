@@ -8,6 +8,13 @@ Higher or Lower (one player at a time, everyone else queues):
     python games.py lower <user>                  guess the next card is lower
     python games.py leave <user>                  leave the queue (bet refunded)
 
+Blackjack (separate table and queue, so both games can run at once):
+    python games.py bj <user> <bet> <balance>     start a hand, or join the queue (bet is charged now)
+    python games.py bj <user>                     show who's playing and who's waiting
+    python games.py hit <user>                    take a card
+    python games.py stand <user>                  stand; Opie plays his hand
+    python games.py double <user> <balance>       double the bet on your first two cards, take one card, stand
+
 Money: every command writes how much to TAKE from the person who typed it to GAME_CHARGE,
 and how much to GIVE them to GAME_PAY (0 when nothing). Mix It Up moves the N-persons.
 """
@@ -27,6 +34,13 @@ HILO_TIMEOUT = 120                       # seconds a player can stall before som
 HILO_QUEUE_MAX = 10
 HILO_NO_PLAY = ("HOSTILE", "MUTINY")     # attitude levels Opie won't play with: he keeps the bet
 
+BJ_MIN_BET = 100
+BJ_MAX_BET = 50000
+BJ_PAYS = 1.5                            # blackjack pays 3:2
+BJ_DEALER_HITS_SOFT_17 = False           # False = Opie stands on every 17 (better for players)
+BJ_TIMEOUT = 120                         # stall this long while someone waits and Opie stands for you
+BJ_QUEUE_MAX = 10
+
 RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]   # ace high
 SUITS = ["♠", "♥", "♦", "♣"]                              # spades hearts diamonds clubs
 
@@ -36,6 +50,12 @@ PUSH_LINES = ["Same rank, nobody wins.", "Boring, like Antman.", "That one's a w
 LOSE_LINES = ["Read 'em and weep, brothaman.", "Into the wine fund it goes.", "Opie wins again. Shocking.",
               "Tough break, mothahucka. Not really, I'm thrilled."]
 
+
+def two_messages(first, rest):
+    """Rules (or similar) as message one, the game as message two; drop message one if the game needs the room."""
+    if len(rest) <= ask.MAX_CHARS:
+        return f"{ask.fit(first)}\n{rest}"
+    return ask.split_reply(rest)
 
 def money(charge=0, pay=0):
     for path, amount in ((GAME_CHARGE, charge), (GAME_PAY, pay)):
@@ -72,13 +92,234 @@ def next_in_line(state):
     nxt = queue.pop(0)
     return " " + start_game(state, nxt["user"], nxt["bet"])
 
+def collect_owed(state, key):
+    """Winnings held for someone (e.g. their stalled hand was auto-stood): paid on their next games command."""
+    return state.setdefault("owed", {}).pop(key, 0)
+
+
+# ---------------------------------------------------------------- blackjack ---
+
+def bj_value(cards):
+    total = sum(11 if r == 12 else 10 if r >= 8 else r + 2 for r, _ in cards)
+    aces = sum(1 for r, _ in cards if r == 12)
+    while total > 21 and aces:
+        total, aces = total - 10, aces - 1
+    soft = aces > 0 and total <= 21
+    return total, soft
+
+def bj_show(cards):
+    return " ".join(card_name(c) for c in cards) + f" ({bj_value(cards)[0]})"
+
+def bj_rules():
+    return (f"BLACKJACK vs Opie: one deck, closest to 21 without busting wins. Blackjack pays 3:2, wins pay 1:1, ties push. "
+            f"Opie hits to 17. !hit, !stand, or !double on your first two cards.")
+
+def bj_deal(state, user, bet):
+    """Deal a hand. Returns (text, finished) where finished = (pay, situation) if it ended on the deal."""
+    deck = new_deck()
+    player, dealer = [deck.pop(), deck.pop()], [deck.pop(), deck.pop()]
+    state["bj"] = {"player": user, "bet": bet, "deck": deck, "hand": player, "dealer": dealer, "last": time.time()}
+    pnat, dnat = bj_value(player)[0] == 21, bj_value(dealer)[0] == 21
+    if pnat or dnat:                     # naturals end the hand on the deal
+        return bj_settle(state, f"@{user} {bet:,} {ask.CURRENCY} on the line. You: {bj_show(player)} | Opie: {bj_show(dealer)}.")
+    up = card_name(dealer[0])
+    return (f"@{user} {bet:,} {ask.CURRENCY} on the line. You: {bj_show(player)} | Opie: {up} ??. "
+            "!hit, !stand or !double?"), None
+
+def bj_settle(state, shown):
+    """Hand's over (or the player stood): Opie plays out if needed, then pay up. Returns (text, (pay, situation))."""
+    game = state["bj"]
+    user, bet, hand, dealer, deck = game["player"], game["bet"], game["hand"], game["dealer"], game["deck"]
+    p, _ = bj_value(hand)
+    pnat = p == 21 and len(hand) == 2
+    dnat = bj_value(dealer)[0] == 21 and len(dealer) == 2
+    if p <= 21 and not pnat and not dnat:  # Opie only draws when there's still a hand to beat
+        while True:
+            d, soft = bj_value(dealer)
+            if d < 17 or (d == 17 and soft and BJ_DEALER_HITS_SOFT_17):
+                dealer.append(deck.pop())
+            else:
+                break
+        shown = f"{shown} Opie: {bj_show(dealer)}."
+    d = bj_value(dealer)[0]
+    if pnat and dnat:
+        result, pay = "Both blackjack, PUSH", bet
+    elif pnat:
+        result, pay = "BLACKJACK", int(bet + bet * BJ_PAYS)
+    elif dnat:
+        result, pay = "Opie has blackjack", 0
+    elif p > 21:
+        result, pay = "BUST", 0
+    elif d > 21:
+        result, pay = "Opie busts, you WIN", bet * 2
+    elif p > d:
+        result, pay = "You WIN", bet * 2
+    elif p == d:
+        result, pay = "PUSH", bet
+    else:
+        result, pay = "Opie wins", 0
+    if pay == 0:
+        state["wine_fund"] = state.get("wine_fund", 0) + bet
+        text = f"{shown} {result}. You lose your {bet:,} {ask.CURRENCY}."
+    elif pay == bet:
+        text = f"{shown} {result}. You get your bet back."
+    else:
+        text = f"{shown} {result}! You take home {pay:,} {ask.CURRENCY}!"
+    situation = (f"{user} just played blackjack against you: their hand {p}, yours {d}. Outcome: {result}. "
+                 + ("They won." if pay > bet else "It was a tie." if pay == bet else "They lost.") + " React.")
+    return text, (pay, situation)
+
+def bj_next(state):
+    """Hand over: deal the next player in, if anyone's waiting."""
+    state["bj"] = None
+    queue = state.get("bj_queue", [])
+    if not queue:
+        return ""
+    nxt = queue.pop(0)
+    text, finished = bj_deal(state, nxt["user"], nxt["bet"])
+    if finished:                         # they got a natural on the deal: settle now, pay them when they next type
+        pay, _ = finished
+        if pay:
+            owed = state.setdefault("owed", {})
+            owed[ask.norm(nxt["user"])] = owed.get(ask.norm(nxt["user"]), 0) + pay
+        text += (" Winnings paid on your next game command." if pay else "") + bj_next(state)
+    return " " + text
+
+def cmd_bj(user, raw_bet="", raw_balance=""):
+    user = user.lstrip("@")
+    key = ask.norm(user)
+    money()
+
+    if not raw_bet:
+        with ask.StateLock():
+            state = ask.load_state()
+        game, queue = state.get("bj"), state.get("bj_queue", [])
+        if not game:
+            ask.write(f"@{user} the blackjack table's open. Type !bj and a bet ({BJ_MIN_BET:,} to {BJ_MAX_BET:,}).")
+        else:
+            waiting = ", ".join(q["user"] for q in queue) or "nobody"
+            ask.write(f"{game['player']} is playing blackjack ({bj_value(game['hand'])[0]} vs Opie's "
+                      f"{card_name(game['dealer'][0])}). Waiting: {waiting}.")
+        return
+
+    balance = ask.parse_balance(raw_balance)
+    if balance is None:
+        ask.write(f"@{user} I can't see your wallet right now, brothaman. Try again in a bit.")
+        return
+    bet = ask.parse_amount(raw_bet, balance)
+    if bet is None:
+        ask.write(f"@{user} bet how much? e.g. !bj 5000, brothaman.")
+        return
+    bet = min(bet, BJ_MAX_BET) if raw_bet.strip().lower() in ("all", "max", "everything") else bet
+    if bet < BJ_MIN_BET or bet > BJ_MAX_BET:
+        ask.write(f"@{user} bets are {BJ_MIN_BET:,} to {BJ_MAX_BET:,} {ask.CURRENCY}, brothaman.")
+        return
+    if bet > balance:
+        ask.write(f"@{user} you've only got {balance:,} {ask.CURRENCY}. Nice try, brothaman.")
+        return
+
+    def join(state):
+        owed = collect_owed(state, key)
+        u = ask.get_user(state, key)
+        if key not in ask.EXEMPT and ask.level(u["dis"]) in HILO_NO_PLAY:
+            state["wine_fund"] = state.get("wine_fund", 0) + bet
+            return "grudge", owed, (f"@{user} I'll take that {bet:,} {ask.CURRENCY}, thanks. But I'm not dealing to you. "
+                                    "Come back when you've learned some manners, brothaman."), None
+        game = state.get("bj")
+        queue = state.setdefault("bj_queue", [])
+        if game and ask.norm(game["player"]) == key:
+            return "busy", owed, f"@{user} you're already playing, brothaman. You've got {bj_value(game['hand'])[0]}.", None
+        if any(ask.norm(q["user"]) == key for q in queue):
+            spot = next(i for i, q in enumerate(queue, 1) if ask.norm(q["user"]) == key)
+            return "busy", owed, f"@{user} you're already #{spot} in line. Patience, brothaman.", None
+        prefix, ending = "", None
+        if game and time.time() - game["last"] > BJ_TIMEOUT:   # stalled: stand for them and settle
+            sleeper, p = game["player"], bj_value(game["hand"])[0]
+            _, (pay, _) = bj_settle(state, "")
+            if pay:
+                owed_map = state.setdefault("owed", {})
+                owed_map[ask.norm(sleeper)] = owed_map.get(ask.norm(sleeper), 0) + pay
+            verdict = (f"they win {pay:,}, paid on their next game command." if pay > game["bet"] else
+                       "it's a push, bet back on their next game command." if pay else "Opie keeps their bet.")
+            prefix = (f"{sleeper} fell asleep on {p}, so I stood for them. Opie: {bj_show(game['dealer'])}, "
+                      f"{verdict} ")
+            game = None
+            state["bj"] = None
+            if queue:
+                queue.append({"user": user, "bet": bet})
+                return "charge", owed, prefix + bj_next(state).strip() + f" @{user} you're #{len(queue)} in line.", None
+        if not game:
+            text, finished = bj_deal(state, user, bet)
+            if finished:
+                pay, situation = finished
+                return "charge", owed, f"{prefix}{bj_rules()}\n{text}", (pay, situation, bj_next(state))
+            return "charge", owed, f"{prefix}{bj_rules()}\n{text}", None
+        if len(queue) >= BJ_QUEUE_MAX:
+            return "busy", owed, f"@{user} the line's full, brothaman. Try again in a bit.", None
+        queue.append({"user": user, "bet": bet})
+        return "charge", owed, (f"{bj_rules()}\n@{user} {game['player']}'s at the table. You're #{len(queue)} in line with "
+                                f"{bet:,} {ask.CURRENCY}. (!leave to back out)"), None
+    outcome, owed, text, finished = ask.update_state(join)
+    pay = owed
+    if finished:
+        hand_pay, situation, next_game = finished
+        pay += hand_pay
+        text = f"{text} {finale(user, 'Lucky deal, brothaman.' if hand_pay else 'House wins, brothaman.', situation)}{next_game}"
+    money(charge=bet if outcome in ("charge", "grudge") else 0, pay=pay)
+    first, _, second = text.partition("\n")
+    ask.write(two_messages(first, second) if second else ask.split_reply(text))
+
+def cmd_bj_move(user, move, raw_balance=""):
+    user = user.lstrip("@")
+    key = ask.norm(user)
+    money()
+    balance = ask.parse_balance(raw_balance)
+
+    def play(state):
+        owed = collect_owed(state, key)
+        game = state.get("bj")
+        queue = state.get("bj_queue", [])
+        if not game:
+            return 0, owed, f"@{user} nobody's playing blackjack. Type !bj and a bet to start, brothaman.", None
+        if ask.norm(game["player"]) != key:
+            spot = next((i for i, q in enumerate(queue, 1) if ask.norm(q["user"]) == key), None)
+            where = f"you're #{spot} in line" if spot else "type !bj and a bet to get in line"
+            return 0, owed, f"@{user} it's {game['player']}'s hand, {where}.", None
+        game["last"] = time.time()
+        charge = 0
+        if move == "double":
+            if len(game["hand"]) != 2:
+                return 0, owed, f"@{user} you can only double on your first two cards, brothaman. !hit or !stand.", None
+            if balance is None or balance < game["bet"]:
+                return 0, owed, f"@{user} you can't cover the double, brothaman. !hit or !stand.", None
+            charge = game["bet"]
+            game["bet"] *= 2
+        if move in ("hit", "double"):
+            game["hand"].append(game["deck"].pop())
+        p = bj_value(game["hand"])[0]
+        if move == "hit" and p < 21:
+            return 0, owed, (f"@{user} You: {bj_show(game['hand'])} | Opie: {card_name(game['dealer'][0])} ??. "
+                             "!hit or !stand?"), None
+        lead = f"@{user} {'Doubled! ' if move == 'double' else ''}You: {bj_show(game['hand'])}."
+        text, (pay, situation) = bj_settle(state, lead)
+        return charge, owed, text, (pay, situation, bj_next(state))
+    charge, owed, text, finished = ask.update_state(play)
+    pay = owed
+    if finished:
+        hand_pay, situation, next_game = finished
+        pay += hand_pay
+        text = f"{text} {finale(user, 'Lucky bastard.' if hand_pay else 'House wins, brothaman.', situation)}{next_game}"
+    money(charge=charge, pay=pay)
+    ask.write(ask.split_reply(text))
+
+
 def finale(user, text_if_offline, situation):
     """One short Opie line for the big moments; the numbers are already in the message."""
     try:
         with ask.StateLock():
             mood = ask.current_mood(ask.load_state())
         line = ask.ollama([
-            {"role": "system", "content": f"{ask.SYSTEM} {mood} You're the dealer in a Higher or Lower card game. "
+            {"role": "system", "content": f"{ask.SYSTEM} {mood} You're the dealer in a card game. "
                                           "One short sentence, no numbers."},
             {"role": "user", "content": situation},
         ])
@@ -121,7 +362,9 @@ def cmd_hilo(user, raw_bet="", raw_balance=""):
         ask.write(f"@{user} you've only got {balance:,} {ask.CURRENCY}. Nice try, brothaman.")
         return
 
+    owed = [0]
     def join(state):
+        owed[0] = collect_owed(state, key)
         u = ask.get_user(state, key)
         if key not in ask.EXEMPT and ask.level(u["dis"]) in HILO_NO_PLAY:
             state["wine_fund"] = state.get("wine_fund", 0) + bet
@@ -151,10 +394,9 @@ def cmd_hilo(user, raw_bet="", raw_balance=""):
         return "charge", (f"{rules()}\n@{user} {game['player']}'s at the table. You're #{len(queue)} in line with "
                           f"{bet:,} {ask.CURRENCY}. I'll deal you in when they bust. (!leave to back out)")
     outcome, text = ask.update_state(join)
-    if outcome in ("charge", "grudge"):
-        money(charge=bet)
+    money(charge=bet if outcome in ("charge", "grudge") else 0, pay=owed[0])
     first, _, second = text.partition("\n")   # rules + game come pre-split into two messages
-    ask.write(f"{ask.fit(first)}\n{ask.fit(second)}" if second else ask.split_reply(text))
+    ask.write(two_messages(first, second) if second else ask.split_reply(text))
 
 
 def cmd_guess(user, guess):
@@ -162,7 +404,9 @@ def cmd_guess(user, guess):
     key = ask.norm(user)
     money()
 
+    owed = [0]
     def play(state):
+        owed[0] = collect_owed(state, key)
         game = state.get("hilo")
         queue = state.get("hilo_queue", [])
         if not game:
@@ -201,6 +445,7 @@ def cmd_guess(user, guess):
         return 0, (f"@{user} {shown} {'WIN' if result == 'win' else 'PUSH'}! {line} Pot: {pot:,}. "
                    f"{card_name(new)}: !higher or !lower? (guess {game['round']}/{HILO_ROUNDS})"), None
     pay, text, ending = ask.update_state(play)
+    pay += owed[0]
 
     if ending:                           # game over: one Opie line, then deal the next player in
         situation, fallback, next_game = ending
@@ -214,12 +459,14 @@ def cmd_leave(user):
     key = ask.norm(user)
     money()
     def leave(state):
-        queue = state.get("hilo_queue", [])
-        for i, q in enumerate(queue):
-            if ask.norm(q["user"]) == key:
-                queue.pop(i)
-                return q["bet"]
-        return 0
+        refund = collect_owed(state, key)
+        for name in ("hilo_queue", "bj_queue"):
+            queue = state.get(name, [])
+            for i, q in enumerate(queue):
+                if ask.norm(q["user"]) == key:
+                    refund += queue.pop(i)["bet"]
+                    break
+        return refund
     refund = ask.update_state(leave)
     if refund:
         money(pay=refund)
@@ -238,8 +485,12 @@ def main():
         cmd_guess(user, "higher" if cmd.startswith("h") else "lower")
     elif cmd == "leave":
         cmd_leave(user)
+    elif cmd in ("bj", "blackjack"):
+        cmd_bj(user, *(args[2:] + ["", ""])[:2])
+    elif cmd in ("hit", "stand", "double"):
+        cmd_bj_move(user, cmd, args[2] if len(args) > 2 else "")
     else:
-        ask.write("Opie's games: hilo, higher, lower, leave.")
+        ask.write("Opie's games: hilo, higher, lower, bj, hit, stand, double, leave.")
 
 
 if __name__ == "__main__":

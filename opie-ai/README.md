@@ -13,7 +13,7 @@ Everything lives in `D:\DOODA\streamscripts\`:
 | `ai_reply2.txt` | Second message of a long reply, or `none` |
 | `ai_chime.txt` | Backup copy of the last in-chat reply or chime-in. Nothing reads it |
 | `tip_amount.txt` | Amount the last `!tip` should take from the tipper, or 0 |
-| `games.py` | Opie's games (Higher or Lower). Shares his brain with `ask.py`, so keep them in the same folder |
+| `games.py` | Opie's games (Higher or Lower, Blackjack). Shares his brain with `ask.py`, so keep them in the same folder |
 | `game_charge.txt` / `game_pay.txt` | What the last games command should take from / give to the player |
 | `opie_backups\` | Daily copies of `opie_state.json` (last 7 days) |
 | `opie_errors.log` | What went wrong, if anything. Send it to Claude when something breaks |
@@ -94,6 +94,35 @@ If the player stalls for 2 minutes and someone's waiting, they forfeit. Players 
 | `!leave` | `"D:\DOODA\streamscripts\games.py" leave "$username"` |
 
 Settings at the top of `games.py`: `HILO_MIN_BET`, `HILO_MAX_BET`, `HILO_ROUNDS`, `HILO_WIN_MULT`, `HILO_TIMEOUT`, `HILO_QUEUE_MAX`, `HILO_NO_PLAY`.
+
+### Blackjack
+One player at a time; everyone else queues (separate from the Higher or Lower line, so both games can run at once).
+One deck, reshuffled every hand. Blackjack pays 3:2, wins pay 1:1, ties push. Opie hits until 17 and stands on any 17.
+Double down on your first two cards (one more card, then you stand). No splits or insurance. House edge is about 1%.
+
+| Type in chat | What happens |
+|---|---|
+| `!bj 5000` | Deal a hand, or join the line (your bet is taken now) |
+| `!bj` | Who's playing and who's waiting |
+| `!hit` / `!stand` | Take a card / let Opie play his hand |
+| `!double` | Double your bet on your first two cards, take one card, stand |
+| `!leave` | Leave whichever line you're in, bet refunded |
+
+If the player stalls for 2 minutes and someone's waiting, Opie stands for them. Anything they win is held and paid on their
+next game command (any game). Players Opie is HOSTILE or MUTINY with lose their bet and don't get dealt in.
+
+**Mix It Up:** same four-step pattern as Higher or Lower (charge file, pay file, second message):
+
+| Command | Arguments |
+|---|---|
+| `!bj` | `"D:\DOODA\streamscripts\games.py" bj "$username" "$arg1text" "<balance identifier>"` |
+| `!hit` | `"D:\DOODA\streamscripts\games.py" hit "$username"` |
+| `!stand` | `"D:\DOODA\streamscripts\games.py" stand "$username"` |
+| `!double` | `"D:\DOODA\streamscripts\games.py" double "$username" "<balance identifier>"` |
+
+`!hit` and `!stand` need the pay step (a hand can end on them). `!double` needs both charge and pay.
+
+Settings at the top of `games.py`: `BJ_MIN_BET`, `BJ_MAX_BET`, `BJ_PAYS`, `BJ_DEALER_HITS_SOFT_17`, `BJ_TIMEOUT`, `BJ_QUEUE_MAX`.
 
 ## Mix It Up setup
 
@@ -313,7 +342,7 @@ Rules: he only gives to people he likes (attitude CHILL). Each "no" comes with a
 | `SEARCH_RESULTS` / `SNIPPET_CHARS` | `4` / `400` | How much search text the model sees |
 | `OBS_HOST` / `OBS_PORT` | `localhost` / `4455` | OBS WebSocket (OBS → Tools → WebSocket Server Settings) |
 | `OBS_PASSWORD_FILE` | `tip_amount.txt` | Amount the last `!tip` should take from the tipper, or 0 |
-| `games.py` | Opie's games (Higher or Lower). Shares his brain with `ask.py`, so keep them in the same folder |
+| `games.py` | Opie's games (Higher or Lower, Blackjack). Shares his brain with `ask.py`, so keep them in the same folder |
 | `game_charge.txt` / `game_pay.txt` | What the last games command should take from / give to the player |
 | `opie_backups\` | Daily copies of `opie_state.json` (last 7 days) |
 | `opie_errors.log` | What went wrong, if anything. Send it to Claude when something breaks |
