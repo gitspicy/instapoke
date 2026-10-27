@@ -81,7 +81,7 @@ def start_game(state, user, bet):
     first = deck.pop()
     state["hilo"] = {"player": user, "bet": bet, "deck": deck, "card": first, "round": 1, "wins": 0, "last": time.time()}
     return (f"@{user} you're up! {bet:,} {ask.CURRENCY} on the line. "
-            f"Card: {card_name(first)}. !higher or !lower? (guess 1/{HILO_ROUNDS})")
+            f"Card: {card_name(first)}. !hilo higher or lower? (guess 1/{HILO_ROUNDS})")
 
 def next_in_line(state):
     """Current game is over: start the next queued player's game, if anyone's waiting."""
@@ -112,7 +112,7 @@ def bj_show(cards):
 
 def bj_rules():
     return (f"BLACKJACK vs Opie: one deck, closest to 21 without busting wins. Blackjack pays 3:2, wins pay 1:1, ties push. "
-            f"Opie hits to 17. !hit, !stand, or !double on your first two cards.")
+            f"Opie hits to 17. !bj hit, !bj stand, or !bj double on your first two cards.")
 
 def bj_deal(state, user, bet):
     """Deal a hand. Returns (text, finished) where finished = (pay, situation) if it ended on the deal."""
@@ -124,7 +124,7 @@ def bj_deal(state, user, bet):
         return bj_settle(state, f"@{user} {bet:,} {ask.CURRENCY} on the line. You: {bj_show(player)} | Opie: {bj_show(dealer)}.")
     up = card_name(dealer[0])
     return (f"@{user} {bet:,} {ask.CURRENCY} on the line. You: {bj_show(player)} | Opie: {up} ??. "
-            "!hit, !stand or !double?"), None
+            "!bj hit, stand or double?"), None
 
 def bj_settle(state, shown):
     """Hand's over (or the player stood): Opie plays out if needed, then pay up. Returns (text, (pay, situation))."""
@@ -186,6 +186,11 @@ def bj_next(state):
     return " " + text
 
 def cmd_bj(user, raw_bet="", raw_balance=""):
+    word = raw_bet.strip().lower()
+    if word in BJ_MOVES:                 # "!bj hit" works as well as "!hit"
+        return cmd_bj_move(user, BJ_MOVES[word], raw_balance)
+    if word == "leave":
+        return cmd_leave(user)
     user = user.lstrip("@")
     key = ask.norm(user)
     money()
@@ -195,7 +200,8 @@ def cmd_bj(user, raw_bet="", raw_balance=""):
             state = ask.load_state()
         game, queue = state.get("bj"), state.get("bj_queue", [])
         if not game:
-            ask.write(f"@{user} the blackjack table's open. Type !bj and a bet ({BJ_MIN_BET:,} to {BJ_MAX_BET:,}).")
+            ask.write(f"@{user} the blackjack table's open. Type !bj and a bet ({BJ_MIN_BET:,} to {BJ_MAX_BET:,}), "
+                      "then !bj hit, !bj stand or !bj double.")
         else:
             waiting = ", ".join(q["user"] for q in queue) or "nobody"
             ask.write(f"{game['player']} is playing blackjack ({bj_value(game['hand'])[0]} vs Opie's "
@@ -258,7 +264,7 @@ def cmd_bj(user, raw_bet="", raw_balance=""):
             return "busy", owed, f"@{user} the line's full, brothaman. Try again in a bit.", None
         queue.append({"user": user, "bet": bet})
         return "charge", owed, (f"{bj_rules()}\n@{user} {game['player']}'s at the table. You're #{len(queue)} in line with "
-                                f"{bet:,} {ask.CURRENCY}. (!leave to back out)"), None
+                                f"{bet:,} {ask.CURRENCY}. (!bj leave to back out)"), None
     outcome, owed, text, finished = ask.update_state(join)
     pay = owed
     if finished:
@@ -289,9 +295,9 @@ def cmd_bj_move(user, move, raw_balance=""):
         charge = 0
         if move == "double":
             if len(game["hand"]) != 2:
-                return 0, owed, f"@{user} you can only double on your first two cards, brothaman. !hit or !stand.", None
+                return 0, owed, f"@{user} you can only double on your first two cards, brothaman. !bj hit or stand.", None
             if balance is None or balance < game["bet"]:
-                return 0, owed, f"@{user} you can't cover the double, brothaman. !hit or !stand.", None
+                return 0, owed, f"@{user} you can't cover the double, brothaman. !bj hit or stand.", None
             charge = game["bet"]
             game["bet"] *= 2
         if move in ("hit", "double"):
@@ -299,7 +305,7 @@ def cmd_bj_move(user, move, raw_balance=""):
         p = bj_value(game["hand"])[0]
         if move == "hit" and p < 21:
             return 0, owed, (f"@{user} You: {bj_show(game['hand'])} | Opie: {card_name(game['dealer'][0])} ??. "
-                             "!hit or !stand?"), None
+                             "!bj hit or stand?"), None
         lead = f"@{user} {'Doubled! ' if move == 'double' else ''}You: {bj_show(game['hand'])}."
         text, (pay, situation) = bj_settle(state, lead)
         return charge, owed, text, (pay, situation, bj_next(state))
@@ -329,7 +335,16 @@ def finale(user, text_if_offline, situation):
         return text_if_offline
 
 
+HILO_MOVES = {"higher": "higher", "hi": "higher", "h": "higher", "up": "higher",
+              "lower": "lower", "lo": "lower", "l": "lower", "down": "lower"}
+BJ_MOVES = {"hit": "hit", "h": "hit", "stand": "stand", "s": "stand", "stay": "stand", "double": "double", "d": "double"}
+
 def cmd_hilo(user, raw_bet="", raw_balance=""):
+    word = raw_bet.strip().lower()
+    if word in HILO_MOVES:               # "!hilo higher" works as well as "!higher"
+        return cmd_guess(user, HILO_MOVES[word])
+    if word == "leave":
+        return cmd_leave(user)
     user = user.lstrip("@")
     key = ask.norm(user)
     money()
@@ -339,7 +354,8 @@ def cmd_hilo(user, raw_bet="", raw_balance=""):
             state = ask.load_state()
         game, queue = state.get("hilo"), state.get("hilo_queue", [])
         if not game:
-            ask.write(f"@{user} the Higher or Lower table's open. Type !hilo and a bet ({HILO_MIN_BET:,} to {HILO_MAX_BET:,}).")
+            ask.write(f"@{user} the Higher or Lower table's open. Type !hilo and a bet ({HILO_MIN_BET:,} to {HILO_MAX_BET:,}), "
+                      "then !hilo higher or !hilo lower.")
         else:
             waiting = ", ".join(q["user"] for q in queue) or "nobody"
             ask.write(f"{game['player']} is playing ({card_name(game['card'])}, guess {game['round']}/{HILO_ROUNDS}). "
@@ -373,7 +389,7 @@ def cmd_hilo(user, raw_bet="", raw_balance=""):
         game = state.get("hilo")
         queue = state.setdefault("hilo_queue", [])
         if game and ask.norm(game["player"]) == key:
-            return "busy", f"@{user} you're already playing, brothaman. !higher or !lower on that {card_name(game['card'])}."
+            return "busy", f"@{user} you're already playing, brothaman. !hilo higher or lower on that {card_name(game['card'])}."
         if any(ask.norm(q["user"]) == key for q in queue):
             spot = next(i for i, q in enumerate(queue, 1) if ask.norm(q["user"]) == key)
             return "busy", f"@{user} you're already #{spot} in line. Patience, brothaman."
@@ -392,7 +408,7 @@ def cmd_hilo(user, raw_bet="", raw_balance=""):
             return "busy", f"@{user} the line's full, brothaman. Try again in a bit."
         queue.append({"user": user, "bet": bet})
         return "charge", (f"{rules()}\n@{user} {game['player']}'s at the table. You're #{len(queue)} in line with "
-                          f"{bet:,} {ask.CURRENCY}. I'll deal you in when they bust. (!leave to back out)")
+                          f"{bet:,} {ask.CURRENCY}. I'll deal you in when they bust. (!hilo leave to back out)")
     outcome, text = ask.update_state(join)
     money(charge=bet if outcome in ("charge", "grudge") else 0, pay=owed[0])
     first, _, second = text.partition("\n")   # rules + game come pre-split into two messages
@@ -410,7 +426,7 @@ def cmd_guess(user, guess):
         game = state.get("hilo")
         queue = state.get("hilo_queue", [])
         if not game:
-            return 0, f"@{user} nobody's playing. Type !hilo and a bet to start, brothaman.", None
+            return 0, f"@{user} nobody's playing Higher or Lower. Type !hilo and a bet to start, brothaman.", None
         if ask.norm(game["player"]) != key:
             spot = next((i for i, q in enumerate(queue, 1) if ask.norm(q["user"]) == key), None)
             where = f"you're #{spot} in line" if spot else "type !hilo and a bet to get in line"
@@ -443,7 +459,7 @@ def cmd_guess(user, guess):
         game["round"] += 1
         line = random.choice(WIN_LINES if result == "win" else PUSH_LINES)
         return 0, (f"@{user} {shown} {'WIN' if result == 'win' else 'PUSH'}! {line} Pot: {pot:,}. "
-                   f"{card_name(new)}: !higher or !lower? (guess {game['round']}/{HILO_ROUNDS})"), None
+                   f"{card_name(new)}: !hilo higher or lower? (guess {game['round']}/{HILO_ROUNDS})"), None
     pay, text, ending = ask.update_state(play)
     pay += owed[0]
 

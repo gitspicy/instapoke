@@ -66,6 +66,10 @@ The first should print nothing. The second should print Opie's mood and edge.
 
 ## Games (`games.py`)
 
+**One Mix It Up command per game is enough:** the move can go after the game's name, so `!hilo` and `!bj` handle everything.
+`!hilo 5000`, `!hilo higher`, `!hilo lower`, `!hilo leave` / `!bj 5000`, `!bj hit`, `!bj stand`, `!bj double`, `!bj leave`.
+(Separate `!higher`, `!hit` etc. commands still work if you'd rather make them.)
+
 ### Higher or Lower
 One player at a time; everyone else queues. Opie flips a card, you call the next one higher or lower (ace high).
 5 guesses per game: a win multiplies the pot by 1.3, a push (same rank) uses a guess and changes nothing, a wrong guess loses it all.
