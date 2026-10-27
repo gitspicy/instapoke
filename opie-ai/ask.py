@@ -1055,6 +1055,8 @@ PROMOS = {                               # what each ad is about; the command mu
     "hilo": ("!hilo", f"Viewers can type !hilo and a bet (up to 50,000 {CURRENCY}) to play Higher or Lower against you: "
                       "call the next card higher or lower, survive 5 guesses and the pot grows every win, one wrong call loses it all. "
                       "One player at a time, everyone else gets in line."),
+    "bj": ("!bj", f"Viewers can type !bj and a bet (up to 100,000 {CURRENCY}) to play blackjack against you, the dealer. "
+                  "Blackjack pays 3:2, they can hit, stand or double down. One player at a time, everyone else gets in line."),
 }
 PROMO_FALLBACKS = {
     "beg": f"Running low on {CURRENCY}? Type !beg and I might take pity on you, brothaman.",
@@ -1062,6 +1064,7 @@ PROMO_FALLBACKS = {
     "news": "The world's gone nuts and I've got the receipts. Type !weirdnews, brothaman.",
     "tip": "Wine doesn't buy itself. Type !tip and show Opie some love, brothaman. Supertips get you forgiven.",
     "hilo": "Feeling lucky? Type !hilo and a bet, call five cards higher or lower, and try to take my money, brothaman.",
+    "bj": "Opie's dealing! Type !bj and a bet, up to 100k, and see if you can beat me to 21, brothaman.",
 }
 
 def cmd_promo(topic):
