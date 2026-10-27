@@ -22,7 +22,7 @@ Those --log replies also go to CHIME_OUT for bots that prefer watching a file.
 """
 import sys, os, io, re, json, time, random, shutil, logging, traceback, contextlib, datetime, urllib.request, urllib.parse
 
-VERSION = "4.7"                          # bump when ask.py changes
+VERSION = "4.8"                          # bump when ask.py changes
 MODEL = "llama3.2"                       # match what `ollama list` shows
 OUT = os.environ.get("OPIE_OUT", r"D:\DOODA\streamscripts\ai_reply.txt")
 CHIME_OUT = os.environ.get("OPIE_CHIME_OUT", r"D:\DOODA\streamscripts\ai_chime.txt")
@@ -138,6 +138,14 @@ MOOD_MAX_HOURS = 10
 ROAST_COOLDOWN = 120                     # seconds before the same person can call another roast
 ROAST_TARGET_COOLDOWN = 300              # seconds before the same person can be roasted again (stops pile-ons)
 ROAST_LINES = 15                         # how many of the target's recent chat lines Opie gets to work with
+
+# --- !recap ---
+RECAP_DEFAULT_MINUTES = 120              # !recap with no number covers this many minutes
+RECAP_MAX_MINUTES = 480                  # longest window anyone can ask for (8 hours)
+RECAP_COOLDOWN = 120                     # seconds before the same person can ask for another recap
+RECAP_LINES = 60                         # most chat lines handed to the model; busy windows get sampled evenly
+HISTORY_HOURS = 8                        # chat kept on disk for recaps (separate from Opie's short memory)
+HISTORY_MAX = 2000                       # hard cap on lines kept for recaps
 
 # --- Opie's Weird News ---
 NEWS_COOLDOWN = 120                      # seconds between segments (owners skip it)
@@ -393,6 +401,7 @@ def load_state():
     state.setdefault("spoke_at", 0)
     state.setdefault("since_spoke", 0)
     state.setdefault("edge", EDGE_DEFAULT)
+    state.setdefault("history", list(state["chat"]))   # first run: start the recap history from Opie's memory
     return state
 
 def save_state(state):
@@ -438,8 +447,14 @@ def current_mood(state):
     return f"{MOODS[state['mood']]} {EDGE_LEVELS[state['edge']]} Play the mood at that edge level."
 
 def add_chat(state, user, text):
-    state["chat"].append([time.time(), user, text[:600 if user == BOT_NAME else 300]])
+    now = time.time()
+    state["chat"].append([now, user, text[:600 if user == BOT_NAME else 300]])
     del state["chat"][:-CHAT_KEEP]
+    history = state["history"]
+    history.append([now, user, text[:300]])
+    del history[:-HISTORY_MAX]
+    while history and now - history[0][0] > HISTORY_HOURS * 3600:
+        history.pop(0)
     if user == BOT_NAME:
         state["spoke_at"] = time.time()
         state["since_spoke"] = 0
@@ -776,6 +791,86 @@ def cmd_roast(user, target):
         state.setdefault("roasted", {})[tkey] = now
         add_chat(state, BOT_NAME, reply.replace("\n", " "))
     update_state(finish)
+
+def span(minutes):
+    if minutes % 60 == 0:
+        return "hour" if minutes == 60 else f"{minutes // 60} hours"
+    return f"{minutes} min" if minutes < 60 else f"{minutes // 60}h {minutes % 60}m"
+
+def cmd_recap(user, rest):
+    """!recap [@user] [minutes] - what chat (or one person) has been up to."""
+    user = user.lstrip("@")
+    key = norm(user)
+    minutes, target = RECAP_DEFAULT_MINUTES, ""
+    for word in rest.replace(",", " ").split():
+        num = re.fullmatch(r"(\d+)\s*(m|min|mins|minutes?)?", word, re.I)
+        hrs = re.fullmatch(r"(\d+)\s*(h|hr|hrs|hours?)", word, re.I)
+        if num:
+            minutes = int(num.group(1))
+        elif hrs:
+            minutes = int(hrs.group(1)) * 60
+        elif not target and not word.startswith("$"):   # skip unfilled Mix It Up identifiers
+            target = word.lstrip("@")
+    minutes = max(1, min(minutes, RECAP_MAX_MINUTES))
+    tkey = norm(target)
+    window = span(minutes)
+
+    def prepare(state):
+        now = time.time()
+        u = get_user(state, key)
+        if key not in EXEMPT:
+            wait = RECAP_COOLDOWN - (now - u.get("recap_at", 0))
+            if wait > 0:
+                return {"notice": f"@{user} I just did a recap, try again in {int(wait) + 1}s, brothaman."}
+            if level(u["dis"]) == "MUTINY":
+                return {"notice": f"@{user} recap this: you've been a jerk to me all day. Ask nicely tomorrow."}
+        lines = []
+        for ts, n, t in state["history"]:
+            if now - ts > minutes * 60 or t.startswith("!"):
+                continue
+            if tkey and norm(n) != tkey and not (norm(n) in BOT_ACCOUNTS | {norm(BOT_NAME)} and "@" + tkey in t.lower()):
+                continue
+            lines.append(f"[{ago(ts)} ago] {n}: {t[:120]}")
+        u["recap_at"] = now
+        return {"lines": lines, "mood": current_mood(state)}
+    ctx = update_state(prepare)
+    if "notice" in ctx:
+        write(ctx["notice"])
+        return
+    lines = ctx["lines"]
+    if not lines:
+        write(f"@{user} {target} hasn't said a word in the last {window}. Lurker." if target else
+              f"@{user} nothing's happened in the last {window}. Dead air, brothaman.")
+        update_state(lambda state: get_user(state, key).pop("recap_at", None))   # nothing aired, don't burn the cooldown
+        return
+    if len(lines) > RECAP_LINES:         # busy chat: sample evenly so the whole window is covered
+        step = len(lines) / RECAP_LINES
+        lines = [lines[int(i * step)] for i in range(RECAP_LINES)]
+
+    if target:
+        task = (f"{user} wants a recap of what {target} has been saying in chat over the last {window}. "
+                f"Sum up {target}'s main topics and any highlights, with your own commentary on them.")
+    else:
+        task = (f"{user} wants a recap of chat over the last {window}. Hit the main topics, who was most active, "
+                "any drama or big gambling wins and losses, with your own commentary.")
+    system = (f"{SYSTEM} {ctx['mood']} You're doing a quick recap, like a radio host catching up listeners who just tuned in. "
+              "Two or three short sentences, under 380 characters total. Use people's names without the @. "
+              f"Start with @{user}. Only use what's in the chat log, don't invent anything.")
+    try:
+        text = re.sub(r"\s+", " ", ollama([
+            {"role": "system", "content": system},
+            {"role": "user", "content": task + "\n\nChat log (oldest first):\n" + "\n".join(lines)},
+        ])).strip()
+        text = scrub(RUDE_LEAD.sub("", re.sub(re.escape(RUDE_TAG), "", text, flags=re.I)).strip())
+    except Exception:
+        text = ""
+    if not text:
+        write(f"@{user} my recap notes are smudged with wine, try again in a bit.")
+        update_state(lambda state: get_user(state, key).pop("recap_at", None))
+        return
+    if not text.lower().startswith("@" + key):
+        text = f"@{user} " + re.sub(r"^@?" + re.escape(user) + r"[,:]?\s*", "", text, flags=re.I)
+    write(split_reply(text))
 
 def reachable(url):
     try:
@@ -1437,6 +1532,8 @@ def main():
         cmd_news(user)
     elif flag == "--roast":
         cmd_roast(user, rest)
+    elif flag == "--recap":
+        cmd_recap(user, rest)
     else:
         cmd_ask(user, rest)
 

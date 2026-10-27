@@ -1,4 +1,4 @@
-# Opie AI (v4.7)
+# Opie AI (v4.8)
 
 **O**nline **P**rogrammed **I**nteractive **E**ntertainment: a parody YouTube chat bot that runs on a local
 Ollama model (`llama3.2`), uses SearXNG for web search, and is wired into chat through Mix It Up.
@@ -37,6 +37,7 @@ The first should print nothing. The second should print Opie's mood and edge.
 | `!ai <question>` (also `!opieai`, `!opie-ai`) | Opie answers. 60s cooldown per person |
 | Any message containing **opie** | Opie replies, no command needed. 15s cooldown while you're mid-conversation; ignored quietly on cooldown |
 | `!roast @user` | Opie roasts them using what they've said in chat. 2 min per asker, 5 min per target |
+| `!recap` | Opie recaps the last 2 hours of chat. `!recap 30` = last 30 min, `!recap @bob` = just bob, `!recap @bob 45` = bob's last 45 min (also `2h`). 2 min cooldown, max 8 hours |
 | `!weirdnews` | **Opie's Weird News**: a real bizarre story from the past week, radio-style. 2 min cooldown (owners skip it) |
 | `!beg` | Beg Opie for free N-persons. 3 begs every 6 hours, only 1 can pay out. Bigger gifts for broke viewers, subs and people who actually chat and gamble |
 | `!tip <amount>` | Tip Opie N-persons (`500`, `5k`, `all`). Every 1,000 knocks 5 off your attitude; 25k+ is a **SUPERTIP** (all forgiven), 250k+ a **MEGATIP** |
@@ -137,13 +138,14 @@ Every command uses the same pattern:
 3. **File**: Read From File `D:\DOODA\streamscripts\ai_reply2.txt` into special identifier `secondreply`
 4. **Conditional**: if `$secondreply` **Not Equals** `none` → **Chat** `$secondreply` (inside the Conditional)
 
-Steps 3–4 are only needed where replies can run long (`!ai`, `!roast`, the chat event, `!opie-status`).
+Steps 3–4 are only needed where replies can run long (`!ai`, `!roast`, `!recap`, the chat event, `!opie-status`).
 
 | Trigger | External Program arguments |
 |---|---|
 | **Event: Chat Message Received** | `"D:\DOODA\streamscripts\ask.py" --log "$username" "$message"`. Wrap steps 2–4 in a Conditional: `$externalprogramresult` not blank |
 | `!ai`, `!opieai`, `!opie-ai` | `"D:\DOODA\streamscripts\ask.py" "$username" $allargs` |
 | `!roast` | `"D:\DOODA\streamscripts\ask.py" --roast "$username" "$arg1text"` |
+| `!recap` | `"D:\DOODA\streamscripts\ask.py" --recap "$username" $allargs` |
 | `!weirdnews` | `"D:\DOODA\streamscripts\ask.py" --news "$username"` |
 | `!beg` | `"D:\DOODA\streamscripts\ask.py" --beg "$username" "<balance identifier>" "<subscriber identifier>"`. Then File: read `beg_award.txt` into `begaward`; Conditional `$begaward` greater than `0` → Currency action: add `$begaward` N-persons to the user |
 | `!tip` | `"D:\DOODA\streamscripts\ask.py" --tip "$username" "$arg1text" "<balance identifier>"`. Then File: read `tip_amount.txt` into `tipamount`; Conditional `$tipamount` greater than `0` → Currency action: **subtract** `$tipamount` N-persons from the user |
@@ -171,6 +173,8 @@ In PowerShell, always put names in quotes (an unquoted `@name` comes through emp
 python ask.py "bob" what year did Terminator come out      # !ai question
 python ask.py --log "bob" "opie what year is it"            # chat message (prints nothing unless Opie replies)
 python ask.py --roast "bob" "t.dratum"                      # bob roasts t.dratum
+python ask.py --recap "bob"                                 # last 2 hours of chat
+python ask.py --recap "bob" "@newuser7" 45                  # newuser7's last 45 min
 python ask.py --mood "SteveYellowstream"                    # Opie's mood + edge
 python ask.py --mood "SteveYellowstream" edge 3             # set edge
 python ask.py --mood "SteveYellowstream" "bob"              # bob's attitude
@@ -266,6 +270,11 @@ python ask.py --status "" ""
 | `ROAST_COOLDOWN` | `120` | Seconds between roasts per asker |
 | `ROAST_TARGET_COOLDOWN` | `300` | Seconds before the same person can be roasted again |
 | `ROAST_LINES` | `15` | Target's chat lines used as material |
+| `RECAP_DEFAULT_MINUTES` | `120` | Window for a plain `!recap` |
+| `RECAP_MAX_MINUTES` | `480` | Longest window anyone can ask for |
+| `RECAP_COOLDOWN` | `120` | Seconds between recaps per person (owners skip it). A recap of an empty window doesn't count |
+| `RECAP_LINES` | `60` | Most lines handed to the model; busier windows are sampled evenly so the whole stretch is covered |
+| `HISTORY_HOURS` / `HISTORY_MAX` | `8` / `2000` | Chat kept on disk for recaps (separate from Opie's 100-line memory) |
 | `CURRENCY` | `"N-persons"` | Currency name in gambling quips |
 | `BIG_LOSS` | `100000` | Loss size that triggers a quip |
 | `LOSS_PATTERN` | matches "Dang @bob, you lost 150000!" | Change if your loss messages are worded differently |
