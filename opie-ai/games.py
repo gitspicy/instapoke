@@ -40,6 +40,7 @@ BJ_PAYS = 1.5                            # blackjack pays 3:2
 BJ_DEALER_HITS_SOFT_17 = False           # False = Opie stands on every 17 (better for players)
 BJ_TIMEOUT = 120                         # stall this long while someone waits and Opie stands for you
 BJ_QUEUE_MAX = 10
+OPIE_BJ = "BAH-LACK JAACK!!"            # what Opie yells when he gets blackjack
 
 RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]   # ace high
 SUITS = ["♠", "♥", "♦", "♣"]                              # spades hearts diamonds clubs
@@ -143,11 +144,11 @@ def bj_settle(state, shown):
         shown = f"{shown} Opie: {bj_show(dealer)}."
     d = bj_value(dealer)[0]
     if pnat and dnat:
-        result, pay = "Both blackjack, PUSH", bet
+        result, pay = f"{OPIE_BJ} Both blackjack, PUSH", bet
     elif pnat:
         result, pay = "BLACKJACK", int(bet + bet * BJ_PAYS)
     elif dnat:
-        result, pay = "Opie has blackjack", 0
+        result, pay = f"{OPIE_BJ} Opie has blackjack", 0
     elif p > 21:
         result, pay = "BUST", 0
     elif d > 21:
