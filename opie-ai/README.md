@@ -106,7 +106,7 @@ Double down on your first two cards (one more card, then you stand). No splits o
 
 | Type in chat | What happens |
 |---|---|
-| `!bj 5000` | Deal a hand, or join the line (your bet is taken now) |
+| `!bj 5000` | Deal a hand, or join the line (your bet is taken now). Bets are 100 to 100,000 |
 | `!bj` | Who's playing and who's waiting |
 | `!hit` / `!stand` | Take a card / let Opie play his hand |
 | `!double` | Double your bet on your first two cards, take one card, stand |

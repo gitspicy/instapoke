@@ -35,7 +35,7 @@ HILO_QUEUE_MAX = 10
 HILO_NO_PLAY = ("HOSTILE", "MUTINY")     # attitude levels Opie won't play with: he keeps the bet
 
 BJ_MIN_BET = 100
-BJ_MAX_BET = 50000
+BJ_MAX_BET = 100000
 BJ_PAYS = 1.5                            # blackjack pays 3:2
 BJ_DEALER_HITS_SOFT_17 = False           # False = Opie stands on every 17 (better for players)
 BJ_TIMEOUT = 120                         # stall this long while someone waits and Opie stands for you
