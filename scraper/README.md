@@ -34,3 +34,37 @@ duplicate links, and links back to the start page itself.
 
 Note: pages that build their content with JavaScript after loading will only
 have their initial HTML copied, since this script doesn't run a browser.
+
+# Question extractor (`extract-questions.php`)
+
+Run this after `scrape.php`. It reads every `.txt` file in the output folder,
+pulls out only the quiz questions and their answer choices, and drops
+everything else on the page.
+
+```bash
+php scraper/extract-questions.php
+```
+
+| Option | What it does |
+| --- | --- |
+| `--in=DIR` | Folder of `.txt` files to read (default `./output`) |
+| `--out=DIR` | Folder to write results to (default `./questions`) |
+| `--all=FILE` | Name of the combined file (default `all-questions.txt`) |
+
+How it reads a page:
+
+- `Question 1 of N` tells it how many questions to look for.
+- Each question is the line starting `1.`, `2.`, … and the answers are the lines
+  after it, up to `NEXT>`. `Hint` lines are dropped.
+- The last question ends at `(Optional) Create a Free FunTrivia ID…`, so a
+  True/False question gets 2 answers and a multiple-choice one gets 4.
+
+Output:
+
+- `questions/<Quiz Title>.txt`: one cleaned file per quiz. The name comes from
+  the page title, cleaned up (e.g. `Tim's Shoes Trivia Quiz | Kids TV` becomes
+  `Tim's Shoes`). Pages with the same cleaned title are merged into one file,
+  without repeating questions.
+- `questions/all-questions.txt`: every question from every quiz in one file,
+  no titles, numbered 1, 2, 3 … straight through.
+- Pages with no questions are skipped and listed when the script runs.
