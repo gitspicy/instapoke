@@ -37,9 +37,10 @@ have their initial HTML copied, since this script doesn't run a browser.
 
 # Question extractor (`extract-questions.php`)
 
-Run this after `scrape.php`. It reads every `.txt` file in the output folder,
-pulls out only the quiz questions and their answer choices, and drops
-everything else on the page.
+Run this after `scrape.php`. It reads every `.html` file in the output folder,
+finds the **Quiz Answer Key and Fun Facts** section, and pulls out each
+question, its answer and its fun fact as plain text. Everything else on the
+page is dropped.
 
 ```bash
 php scraper/extract-questions.php
@@ -47,24 +48,33 @@ php scraper/extract-questions.php
 
 | Option | What it does |
 | --- | --- |
-| `--in=DIR` | Folder of `.txt` files to read (default `./output`) |
+| `--in=DIR` | Folder of `.html` files to read (default `./output`) |
 | `--out=DIR` | Folder to write results to (default `./questions`) |
 | `--all=FILE` | Name of the combined file (default `all-questions.txt`) |
 
 How it reads a page:
 
-- `Question 1 of N` tells it how many questions to look for.
-- Each question is the line starting `1.`, `2.`, … and the answers are the lines
-  after it, up to `NEXT>`. `Hint` lines are dropped.
-- The last question ends at `(Optional) Create a Free FunTrivia ID…`, so a
-  True/False question gets 2 answers and a multiple-choice one gets 4.
+- It starts at the heading `Quiz Answer Key and Fun Facts`; anything above it
+  (menus, the quiz form itself) is ignored.
+- Each question is the line starting `1.`, `2.`, …, followed by `Answer: …`
+  and then the fun fact, up to the next question.
+- It stops at `Source: Author`. If a page has no such line, it stops at the
+  usual page footer (`Related Quizzes`, `Most Recent Scores`, …).
 
-Output:
+Output, one question per block:
 
-- `questions/<Quiz Title>.txt`: one cleaned file per quiz. The name comes from
-  the page title, cleaned up (e.g. `Tim's Shoes Trivia Quiz | Kids TV` becomes
-  `Tim's Shoes`). Pages with the same cleaned title are merged into one file,
+```
+1. Where was the first Larry David and Jerry Seinfeld?
+
+Answer: Diner
+The first script for "Seinfeld" was written at Westway Diner ...
+```
+
+- `questions/<Quiz Title>.txt`: one file per quiz, named from the page title
+  with the clutter removed (`Seinfeld Trivia Quiz | TV | 10 Questions` becomes
+  `Seinfeld`). Pages with the same cleaned title are merged into one file,
   without repeating questions.
 - `questions/all-questions.txt`: every question from every quiz in one file,
   no titles, numbered 1, 2, 3 … straight through.
-- Pages with no questions are skipped and listed when the script runs.
+- Pages with no answer key (like the starting page) are skipped and listed
+  when the script runs.
